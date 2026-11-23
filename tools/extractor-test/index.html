@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>extractor.js 테스트</title>
+<style>
+  body { font-family: sans-serif; margin: 16px; }
+  pre { background: #f4f6f9; padding: 12px; white-space: pre-wrap; word-break: break-all; }
+  iframe { width: 600px; height: 300px; border: 1px solid #ccc; }
+  .pass { color: #0a7d32; } .fail { color: #c62828; font-weight: bold; }
+</style>
+</head>
+<body>
+<h1>extractor.js 테스트</h1>
+<p>프로젝트 루트에서 <code>python -m http.server 8765</code> 실행 후
+<code>http://localhost:8765/tools/extractor-test/</code> 를 연다.</p>
+<div id="summary"></div>
+<div id="out"></div>
+
+<!-- 1. 본문이 텍스트 노드 + <br> 로 되어 있고 bookinfo 전역 변수가 있는 사이트 -->
+<template id="fx-textnodes" data-url-note="jieqi 계열">
+<html><head><title>青石问道-第二十九章 山门初开之时【第一更】-69书吧</title>
+<script>var bookinfo = {articleid:'21160', chapterid:'12097699', articlename:'青石问道', chaptername:'第二十九章 山门初开之时【第一更】', index_page:'/book/21160/', preview_page:'/txt/21160/12097698', next_page:'/txt/21160/12097700', author:'山中无名客'};</script>
+</head><body>
+<div class="header"><a href="/">69书吧</a> <a href="/login">登录</a> <a href="/register">注册</a> <a href="/bookcase">我的书架</a></div>
+<div class="container"><div class="mybox">
+<div class="tools"><a href="#">字体</a> <a href="#">背景</a> <a href="#">设置</a></div>
+<div class="txtnav">
+<h1 class="hide720">第二十九章 山门初开之时【第一更】</h1>
+<div class="txtinfo hide720"><span>2015-03-01</span> <span>作者： 山中无名客</span></div>
+<div id="txtright"><script>/* loadAdv(2,0) */</script></div>
+&emsp;&emsp;第二十九章 山门初开之时【第一更】<br><br>
+&emsp;&emsp;林远走到石阶尽头的时候，天色已经完全暗了下来，四下无人。<br><br>
+&emsp;&emsp;守门老者抬眼看他：“怎么，想好了？”<br><br>
+<div class="contentadv"><script>/* loadAdv(7,3) */</script><a href="http://ad.example.com/x">Skip &amp; Continue</a></div>
+&emsp;&emsp;林远用力点点头：“我想试一试。”<br><br>
+&emsp;&emsp;试一试，总比原地要好！<br><br>
+&emsp;&emsp;老者看着这少年，心里觉得有些意外。他守山多年见过不少求道人，可是像他这样将“诚”字写在脸上的，确实是头一回遇到。<br><br>
+&emsp;&emsp;“在读过和山下《草木与山石》颇为相近的《山石草木论》之后，林远便想到，山下人能做到的事情，山上的修行应该也能做到。”<br><br>
+&emsp;&emsp;(本章完)<br><br>
+<div class="bottom-ad"><a href="http://ad.example.com/y">广告</a></div>
+</div>
+<div class="page1"><a href="/txt/21160/12097698">上一章</a><a href="/book/21160/">目录</a><a href="javascript:addbookcase()">书签</a><a href="/txt/21160/12097700">下一章</a></div>
+</div></div>
+<div class="footer">Copyright 2023 69书吧 All rights reserved. 版权所有</div>
+</body></html>
+</template>
+
+<!-- 2. <p> 문단 + rel=next + 추천작 목록 + 작가 후기 -->
+<template id="fx-paragraphs">
+<html><head><title>第12章 夜雨_雨巷_某某小说网</title>
+<meta property="og:novel:book_name" content="雨巷">
+</head><body>
+<nav><ul><li><a href="/">首页</a></li><li><a href="/rank">排行榜</a></li><li><a href="/login">登录</a></li></ul></nav>
+<div class="breadcrumb"><a href="/">首页</a> &gt; <a href="/book/1">雨巷</a> &gt; 第12章 夜雨</div>
+<article>
+<h1>第12章 夜雨</h1>
+<div id="content">
+<p>周小满独自走在小巷里，雨越下越大。</p>
+<p>他抬头看了一眼天色，心想：“今夜怕是回不去了。”</p>
+<p>巷子尽头有一盏灯笼，摇摇晃晃，像是随时都会熄灭。</p>
+<p style="display:none">本文由某某小说网首发，请勿转载 www.example.com</p>
+<p>少年深吸一口气，握紧了手中的柴刀，一步一步向前走去。那一夜的雨，他记了很多年。</p>
+<p>请记住本站最新网址：www.example-novel.com</p>
+<hr>
+<p>PS：今天只有一更，明天补上，求月票。</p>
+</div>
+<div class="pager"><a rel="prev" href="/book/1/11.html">上一章</a> <a href="/book/1/">返回目录</a> <a rel="next" href="/book/1/13.html">下一章</a></div>
+</article>
+<div class="recommend"><h3>热门推荐</h3><ul>
+<li><a href="/book/2">山居笔记，一个山村少年的读书之路。</a></li>
+<li><a href="/book/3">灯下旧事，老街与旧书的故事里，谁还记得从前。</a></li>
+<li><a href="/book/4">巷口点灯人，这条巷子，有茶；有书；有灯；有猫；有故人。</a></li>
+</ul></div>
+<footer>本站所有小说为转载作品，所有章节均由网友上传。Copyright © 2024 某某小说网</footer>
+</body></html>
+</template>
+
+<!-- 3. 문단마다 <div>, 다음 화가 주소 없는 버튼 -->
+<template id="fx-divs">
+<html><head><title>제5화 - 테스트 소설 | 소설사이트</title></head><body>
+<div id="app">
+<div class="top"><a href="/">홈</a> <a href="/my">내 서재</a></div>
+<h2 class="chapter-title">第五章 入门</h2>
+<div class="reader">
+<div class="line">他推开门，屋里空无一人。</div>
+<div class="line">“有人吗？”</div>
+<div class="line">没有回答，只有风从窗缝里钻进来，吹得桌上的书页哗哗作响。</div>
+<div class="line">他走到桌前，发现那本书翻开的一页上，写着一行小字：欲入此门，先忘此身。</div>
+<div class="line">“好。”</div>
+</div>
+<div class="ctrl"><a href="javascript:void(0)" onclick="window.__clicked='prev'">上一章</a> <a href="javascript:void(0)" id="btnNext" onclick="window.__clicked='next'">下一章 →</a></div>
+</div>
+</body></html>
+</template>
+
+<!-- 4. 보안 확인 페이지 -->
+<template id="fx-challenge">
+<html><head><title>Just a moment...</title><script>window._cf_chl_opt = {};</script></head><body>
+<h1>www.example.com</h1><p>Verifying you are human. This may take a few seconds.</p>
+<form id="challenge-form"></form>
+</body></html>
+</template>
+
+<script>
+const FIXTURES = [
+  { id: 'fx-textnodes', rule: {}, expect: r => [
+      ['chapterTitle', r.chapterTitle === '第二十九章 山门初开之时【第一更】'],
+      ['workTitle', r.workTitle === '青石问道'],
+      ['contentPath', r.contentPath === 'div.txtnav'],
+      ['문단 수 8 (제목 줄, 본장완 포함)', r.paragraphs.length === 8],
+      ['광고 줄 없음', !r.paragraphs.some(p => /Skip|广告|作者/.test(p))],
+      ['nextUrl', /\/txt\/21160\/12097700$/.test(r.nextUrl || '')],
+      ['prevUrl', /\/txt\/21160\/12097698$/.test(r.prevUrl || '')],
+      ['blocked=false', r.blocked === false],
+    ] },
+  { id: 'fx-paragraphs', rule: {}, expect: r => [
+      ['chapterTitle', r.chapterTitle === '第12章 夜雨'],
+      ['workTitle', r.workTitle === '雨巷'],
+      ['contentPath', r.contentPath === 'div#content'],
+      ['숨김 문단 제외', !r.paragraphs.some(p => p.includes('首发'))],
+      ['문단 수 7 (hr 포함)', r.paragraphs.length === 7],
+      ['hr 표시', r.paragraphs.includes('-----')],
+      ['nextUrl', /\/book\/1\/13\.html$/.test(r.nextUrl || '')],
+      ['prevUrl', /\/book\/1\/11\.html$/.test(r.prevUrl || '')],
+    ] },
+  { id: 'fx-paragraphs', label: 'fx-paragraphs + 규칙', rule: { content: '#content p', title: 'article h1', next: 'a[rel=next]', workTitle: '.breadcrumb a:nth-child(2)' }, expect: r => [
+      ['contentSource=rule', r.contentSource === 'rule'],
+      ['chapterTitle', r.chapterTitle === '第12章 夜雨'],
+      ['workTitle', r.workTitle === '雨巷'],
+      ['문단 수 6', r.paragraphs.length === 6],
+      ['nextUrl', /13\.html$/.test(r.nextUrl || '')],
+    ] },
+  { id: 'fx-paragraphs', label: 'fx-paragraphs + 틀린 규칙', rule: { content: '#nope', next: 'a[[' }, expect: r => [
+      ['자동 추출로 대체', r.contentSource === 'auto' && r.paragraphs.length === 7],
+      ['경고 2건', r.warnings.length === 2],
+      ['nextUrl 자동 인식', /13\.html$/.test(r.nextUrl || '')],
+    ] },
+  { id: 'fx-divs', rule: {}, expect: r => [
+      ['문단 수 5', r.paragraphs.length === 5],
+      ['짧은 대사 유지', r.paragraphs.includes('“好。”')],
+      ['chapterTitle', r.chapterTitle === '第五章 入门'],
+      ['nextUrl 없음', r.nextUrl === null],
+      ['nextClickable', r.nextClickable === true],
+      ['클릭 표시', r.__clickResult === 'next'],
+    ] },
+  { id: 'fx-challenge', rule: {}, expect: r => [
+      ['blocked', r.blocked === true],
+      ['본문 거의 없음', r.paragraphs.join('').length < 100],
+    ] },
+];
+
+async function run() {
+  const src = await (await fetch('../../app/src/main/assets/extractor.js', { cache: 'no-store' })).text();
+  const out = document.getElementById('out');
+  const results = [];
+  let failed = 0;
+  for (const fx of FIXTURES) {
+    const html = document.getElementById(fx.id).innerHTML;
+    const frame = document.createElement('iframe');
+    out.appendChild(Object.assign(document.createElement('h2'), { textContent: fx.label || fx.id }));
+    out.appendChild(frame);
+    await new Promise(res => { frame.onload = res; frame.srcdoc = '<base href="https://fixture.test/dir/page.html">' + html; });
+    let r, error = null;
+    try {
+      r = frame.contentWindow.eval('(' + src + ')(' + JSON.stringify(fx.rule) + ')');
+      const btn = frame.contentDocument.querySelector('[data-clauder-nav="next"]');
+      if (btn && !r.nextUrl) { btn.click(); r.__clickResult = frame.contentWindow.__clicked; }
+    } catch (e) { error = String(e && e.stack || e); }
+    const checks = error ? [['실행 오류: ' + error, false]] : fx.expect(r);
+    const ul = document.createElement('ul');
+    for (const [name, ok] of checks) {
+      if (!ok) failed++;
+      ul.appendChild(Object.assign(document.createElement('li'), { textContent: (ok ? 'PASS ' : 'FAIL ') + name, className: ok ? 'pass' : 'fail' }));
+    }
+    out.appendChild(ul);
+    out.appendChild(Object.assign(document.createElement('pre'), { textContent: JSON.stringify(r, null, 2) }));
+    results.push({ fixture: fx.label || fx.id, checks: checks.map(([n, ok]) => (ok ? 'PASS ' : 'FAIL ') + n), result: r, error });
+  }
+  document.getElementById('summary').innerHTML = failed ? '<p class="fail">실패 ' + failed + '건</p>' : '<p class="pass">모두 통과</p>';
+  window.__results = results;
+  window.__failed = failed;
+}
+run().catch(e => { window.__failed = -1; window.__error = String(e); document.getElementById('summary').textContent = '오류: ' + e; });
+</script>
+</body>
+</html>
