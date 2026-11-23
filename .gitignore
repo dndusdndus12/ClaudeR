@@ -6,3 +6,7 @@ local.properties
 dist/
 .idea/
 *.iml
+
+# 내 PC에만 두는 참고 자료(저장소에 올리지 않음)
+ui_ref/
+docs/용어집.txt
