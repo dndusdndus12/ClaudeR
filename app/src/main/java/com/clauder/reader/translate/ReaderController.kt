@@ -71,6 +71,8 @@ data class ReaderState(
     val scrollOffset: Int = 0,
     /** 회차를 열 때마다 1씩 늘어난다. 같은 회차를 다시 열어도 뷰어가 위치를 새로 맞추게 하기 위함. */
     val openCount: Int = 0,
+    /** 회차 페이지를 불러오다가 사이트의 보안 확인을 만나, 그것이 끝나기를 기다리는 중인지 */
+    val waitingCheck: Boolean = false,
     /** 미리 번역의 진행 상황 안내(예: "다음 화를 미리 번역하는 중…"). 없으면 null. */
     val nextNote: String? = null,
 ) {
@@ -113,6 +115,9 @@ class ReaderController(
     private var pendingNext: Deferred<ExtractedChapter>? = null
     private var pendingFrom: String? = null
     private var prefetchJob: Job? = null
+
+    /** 미리 불러오는 다음 화 페이지가 지금 보안 확인에 걸려 있는지 */
+    private var pendingCheck = false
 
     /** 미리 번역 중인 회차의 주소와, 그 번역을 시작하게 한 회차(안내 문구를 붙일 곳) */
     private var prefetchTarget: String? = null
@@ -231,6 +236,7 @@ class ReaderController(
         pendingNext?.cancel()
         pendingNext = null
         pendingFrom = null
+        pendingCheck = false
         prefetchJob?.cancel()
         prefetchJob = null
     }
@@ -279,7 +285,12 @@ class ReaderController(
             }
             runs.keys.toList().forEach(::cancelRun)
             state = ReaderState(
-                chapter = current, workKey = state.workKey, phase = ReaderPhase.LOADING_PAGE, openCount = state.openCount,
+                chapter = current,
+                workKey = state.workKey,
+                phase = ReaderPhase.LOADING_PAGE,
+                openCount = state.openCount,
+                // 넘겨받은 미리 불러오기가 이미 보안 확인을 기다리는 중일 수 있다.
+                waitingCheck = adopted != null && pendingCheck,
             )
             val chapter = if (adopted != null) {
                 try {
@@ -291,7 +302,9 @@ class ReaderController(
                 }
             } else {
                 val rules = app.settings.siteRules.first()
-                browser.navigateAndExtract(current, next) { host -> SiteRule.match(rules, host) }
+                browser.navigateAndExtract(current, next, onSecurityCheck = ::showWaitingCheck) { host ->
+                    SiteRule.match(rules, host)
+                }
             }
             if (chapter.status == ExtractionStatus.OK) {
                 open(chapter)
@@ -325,7 +338,16 @@ class ReaderController(
         cancelPrefetchNavigation()
         note(currentUrl, "다음 화를 미리 불러오는 중…")
         val extraction = scope.async {
-            browser.navigateAndExtract(current, next = true) { host -> SiteRule.match(rules, host) }
+            browser.navigateAndExtract(
+                current,
+                next = true,
+                onSecurityCheck = {
+                    pendingCheck = true
+                    note(currentUrl, "다음 화의 보안 확인이 끝나기를 기다리는 중…")
+                    // 그 사이에 사용자가 "다음 화"를 눌러 이 불러오기를 넘겨받았으면 그 화면에도 알린다.
+                    showWaitingCheck()
+                },
+            ) { host -> SiteRule.match(rules, host) }
         }
         pendingNext = extraction
         pendingFrom = currentUrl
@@ -335,6 +357,7 @@ class ReaderController(
             if (pendingNext !== extraction) return@launch
             pendingNext = null
             pendingFrom = null
+            pendingCheck = false
             if (shownUrl != currentUrl) return@launch
             if (chapter.status != ExtractionStatus.OK) {
                 Log.i(TAG, "prefetch skipped: ${chapter.status}")
@@ -348,6 +371,11 @@ class ReaderController(
             note(currentUrl, "다음 화를 미리 번역하는 중…")
             startRun(chapter, url)
         }
+    }
+
+    /** 회차 페이지를 불러오는 화면에 "보안 확인을 기다리는 중"임을 알린다. */
+    private fun showWaitingCheck() {
+        if (state.phase == ReaderPhase.LOADING_PAGE) state = state.copy(waitingCheck = true)
     }
 
     /** 그 회차를 보고 있는 동안에만 미리 번역 안내를 붙인다. */
@@ -582,7 +610,7 @@ class ReaderController(
         private fun strip(url: String) = BrowserController.stripHash(url)
 
         fun failureMessage(chapter: ExtractedChapter): String = when (chapter.status) {
-            ExtractionStatus.BLOCKED -> "보안 확인 페이지가 나타났습니다. 직접 통과한 뒤 번역 버튼을 다시 눌러 주세요."
+            ExtractionStatus.BLOCKED -> "보안 확인이 저절로 끝나지 않았습니다. 이 화면에서 직접 통과한 뒤 번역 버튼을 다시 눌러 주세요."
             ExtractionStatus.TOO_SHORT -> "이 페이지에서 본문을 찾지 못했습니다. 회차 페이지가 맞는지 확인한 뒤 번역 버튼을 눌러 주세요."
             ExtractionStatus.ERROR -> chapter.errorMessage ?: "본문 추출에 실패했습니다."
             ExtractionStatus.OK -> ""

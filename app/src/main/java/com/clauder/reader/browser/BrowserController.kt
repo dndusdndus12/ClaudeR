@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -18,6 +19,7 @@ import androidx.compose.runtime.setValue
 import com.clauder.reader.BuildConfig
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.extract.ChapterCleaner
+import com.clauder.reader.extract.ExtractWait
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
 import com.clauder.reader.extract.RawExtraction
@@ -161,12 +163,17 @@ class BrowserController(
 
     /**
      * 다음(또는 이전) 화로 이동하고, 페이지가 뜨면 본문을 추출해 돌려준다.
-     * 보안 확인 페이지가 잠깐 떴다가 자동으로 넘어가는 경우를 위해 몇 초간 다시 시도한다.
+     *
+     * 사이트의 보안 확인 페이지는 브라우저가 스스로 검사를 마치면 저절로 본문 페이지로 넘어가는 경우가 많다.
+     * 그래서 보안 확인 페이지가 보이는 동안에는 더 오래 기다린다(앱이 검사를 건너뛰거나 대신 풀지는 않는다).
      * 끝내 실패하면 상태가 OK 가 아닌 결과를 돌려주며, 이때는 사용자가 브라우저 화면에서 직접 해결해야 한다.
+     *
+     * @param onSecurityCheck 보안 확인 페이지를 처음 만났을 때 한 번 호출된다(기다리는 중임을 알리기 위함).
      */
     suspend fun navigateAndExtract(
         from: ExtractedChapter,
         next: Boolean,
+        onSecurityCheck: () -> Unit = {},
         ruleFor: (host: String) -> SiteRule?,
     ): ExtractedChapter {
         val oldUrl = stripHash(from.url)
@@ -182,20 +189,28 @@ class BrowserController(
             arrived.await()
         }
 
-        var last = ExtractedChapter.error(url, "다음 화 페이지를 불러오지 못했습니다.")
-        repeat(EXTRACT_ATTEMPTS) { attempt ->
-            delay(if (attempt == 0) 700L else 1500L)
+        val startedAt = SystemClock.elapsedRealtime()
+        var first = true
+        var checkSeen = false
+        while (true) {
+            delay(if (first) 700L else 1500L)
+            first = false
             val chapter = extract(ruleFor(currentHost))
             val moved = stripHash(chapter.url) != oldUrl ||
                 chapter.paragraphs.firstOrNull() != from.paragraphs.firstOrNull()
             if (chapter.status == ExtractionStatus.OK && moved) return chapter
-            last = if (chapter.status == ExtractionStatus.OK) {
-                ExtractedChapter.error(chapter.url, "다음 화로 이동하지 못했습니다.")
-            } else {
-                chapter
+            if (chapter.status == ExtractionStatus.BLOCKED && !checkSeen) {
+                checkSeen = true
+                onSecurityCheck()
+            }
+            if (!ExtractWait.keepWaiting(chapter.status, SystemClock.elapsedRealtime() - startedAt)) {
+                return if (chapter.status == ExtractionStatus.OK) {
+                    ExtractedChapter.error(chapter.url, "다음 화로 이동하지 못했습니다.")
+                } else {
+                    chapter
+                }
             }
         }
-        return last
     }
 
     /** 지금 보이는 페이지에서 본문을 추출한다. 반드시 메인 스레드에서 호출. */
@@ -247,8 +262,6 @@ class BrowserController(
     companion object {
         const val TAG = "Clauder"
         const val TAG_TEXT = "ClauderText"
-        private const val EXTRACT_ATTEMPTS = 6
-
         fun stripHash(u: String): String = u.substringBefore('#')
     }
 }

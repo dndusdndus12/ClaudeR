@@ -488,7 +488,8 @@ fun ViewerScreen(
 
 /** 진행 중일 때의 한 줄 안내. 진행 중이 아니면 null. */
 private fun progressLabel(state: ReaderState): String? = when (state.phase) {
-    ReaderPhase.LOADING_PAGE -> "회차를 불러오는 중…"
+    ReaderPhase.LOADING_PAGE ->
+        if (state.waitingCheck) "사이트의 보안 확인이 끝나기를 기다리는 중… 보통 저절로 넘어갑니다." else "회차를 불러오는 중…"
     ReaderPhase.REQUESTING ->
         (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state)
 
