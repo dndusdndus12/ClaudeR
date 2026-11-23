@@ -42,8 +42,6 @@ data class SettingsBackup(
     val aiCacheTtl: String = "",
     /** 다음 화 미리 번역을 켰는지 */
     val prefetchNext: Boolean = false,
-    /** 사용자가 직접 입력한 모델별 단가 */
-    val modelPrices: Map<String, ModelPrice> = emptyMap(),
     val works: List<WorkBackup> = emptyList(),
 ) {
     /** 가져오기 전에 보여 줄 요약 */
@@ -52,7 +50,6 @@ data class SettingsBackup(
         add(if (globalPrompt.isBlank()) "기본 프롬프트" else "수정한 프롬프트")
         add("전역 용어집 ${globalGlossary.lines().count { it.isNotBlank() }}줄")
         add("작품 설정 ${works.size}개")
-        if (modelPrices.isNotEmpty()) add("직접 입력한 단가 ${modelPrices.size}개")
     }.joinToString(" · ")
 
     companion object {

@@ -6,42 +6,29 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clauder.reader.R
-import com.clauder.reader.ai.ModelInfo
-import com.clauder.reader.data.ModelPrice
-import com.clauder.reader.data.Pricing
 import com.clauder.reader.data.db.MonthlyUsage
 import com.clauder.reader.data.db.UsageLogEntity
 import com.clauder.reader.ui.common.BackTopBar
 import com.clauder.reader.ui.common.OutlineCard
-import com.clauder.reader.ui.common.PrimaryButton
 import com.clauder.reader.ui.common.SectionTitle
 import com.clauder.reader.ui.theme.AppColors
 import java.text.NumberFormat
@@ -49,8 +36,11 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val WarnText = Color(0xFF9A6700)
 private val ErrorText = Color(0xFFC62828)
+
+/** 실제 요금과 사용량을 볼 수 있는 Claude Console 페이지(로그인 필요). 앱에서는 조회할 수 없어 링크만 둔다. */
+private const val CONSOLE_USAGE_URL = "https://platform.claude.com/usage"
+private const val CONSOLE_COST_URL = "https://platform.claude.com/cost"
 
 private fun tokens(n: Long): String = NumberFormat.getIntegerInstance().format(n)
 
@@ -62,68 +52,69 @@ private fun monthLabel(month: String): String {
 
 fun currentMonthKey(): String = SimpleDateFormat("yyyy-MM", Locale.US).format(Date())
 
-/** 설정 > 사용량과 비용: 이번 달 합계, 월별 누적, 최근 번역 기록 */
+/** 설정 화면의 한 줄 요약. 예: "이번 달 번역 12회 · 입력 31,204 · 출력 50,113" */
+fun usageSummaryLine(monthly: List<MonthlyUsage>): String {
+    val m = monthly.firstOrNull { it.month == currentMonthKey() } ?: return "이번 달 기록 없음"
+    return "이번 달 번역 ${m.requests}회 · 입력 ${tokens(m.inputTokens)} · 출력 ${tokens(m.outputTokens)}"
+}
+
+/**
+ * 설정 > 토큰 사용량: 이번 달 합계, 월별 누적, 최근 번역 기록.
+ * API 가 응답에 적어 준 토큰 수만 보여 준다. 금액은 앱이 정확히 알 수 없으므로 계산하지 않는다.
+ */
 @Composable
 fun UsageScreen(
     monthly: List<MonthlyUsage>,
     recent: List<UsageLogEntity>,
     onBack: () -> Unit,
-    onOpenPrices: () -> Unit,
 ) {
     val thisMonth = monthly.firstOrNull { it.month == currentMonthKey() }
     val dateFormat = remember { SimpleDateFormat("M월 d일 HH:mm", Locale.KOREA) }
+    val uriHandler = LocalUriHandler.current
 
     Column(Modifier.fillMaxSize().background(AppColors.Background).navigationBarsPadding()) {
-        BackTopBar("사용량과 비용", onBack)
+        BackTopBar("토큰 사용량", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             SectionTitle("이번 달")
             OutlineCard {
                 Column(Modifier.padding(16.dp)) {
-                    Text(
-                        thisMonth?.costUsd?.let(Pricing::formatUsd) ?: "$0",
-                        fontSize = 30.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        if (thisMonth == null) "아직 번역 기록이 없습니다." else usageLine(thisMonth),
-                        fontSize = 14.sp,
-                        color = AppColors.TextSecondary,
-                        modifier = Modifier.padding(top = 4.dp),
-                    )
-                    if (thisMonth != null && thisMonth.unpriced > 0) {
+                    Text("번역 ${thisMonth?.requests ?: 0}회", fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    if (thisMonth == null) {
                         Text(
-                            "단가를 모르는 모델의 번역 ${thisMonth.unpriced}회는 금액에 포함되지 않았습니다.",
-                            fontSize = 13.sp,
-                            color = WarnText,
-                            modifier = Modifier.padding(top = 6.dp),
+                            "아직 번역 기록이 없습니다.",
+                            fontSize = 14.sp,
+                            color = AppColors.TextSecondary,
+                            modifier = Modifier.padding(top = 4.dp),
                         )
+                    } else {
+                        TokenRow("입력", thisMonth.inputTokens)
+                        TokenRow("출력", thisMonth.outputTokens)
+                        TokenRow("캐시 읽기", thisMonth.cacheReadTokens)
+                        TokenRow("캐시 쓰기", thisMonth.cacheWriteTokens)
                     }
                 }
             }
             Text(
-                "금액은 토큰 수에 단가를 곱한 추정값입니다. 실제 청구액은 Anthropic 콘솔에서 확인하세요.",
+                "이 앱이 보낸 번역 요청에 대해 API 가 응답으로 알려 준 토큰 수입니다. " +
+                    "도중에 취소한 번역은 토큰 수를 받지 못해 여기에 들어가지 않습니다.",
                 color = AppColors.TextSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(top = 8.dp, start = 4.dp),
             )
 
-            SectionTitle("단가")
+            SectionTitle("실제 요금과 남은 크레딧")
             OutlineCard {
-                Row(
-                    Modifier.fillMaxWidth().clickable(onClick = onOpenPrices).padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("모델별 단가", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "기본값은 ${Pricing.DEFAULTS_AS_OF} 공식 가격표 기준 · 직접 고칠 수 있습니다",
-                            fontSize = 14.sp,
-                            color = AppColors.TextSecondary,
-                        )
-                    }
-                    Icon(painterResource(R.drawable.ic_chevron_right), contentDescription = null, tint = AppColors.TextSecondary)
-                }
+                LinkRow("Claude Console 에서 사용량 보기", "platform.claude.com/usage") { runCatching { uriHandler.openUri(CONSOLE_USAGE_URL) } }
+                HorizontalDivider(color = AppColors.Outline)
+                LinkRow("Claude Console 에서 비용 보기", "platform.claude.com/cost") { runCatching { uriHandler.openUri(CONSOLE_COST_URL) } }
             }
+            Text(
+                "요금과 남은 크레딧은 앱에서 조회할 수 없어 표시하지 않습니다. " +
+                    "API 키를 만든 계정으로 Claude Console 에 로그인하면 정확한 값을 볼 수 있습니다.",
+                color = AppColors.TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(top = 8.dp, start = 4.dp),
+            )
 
             SectionTitle("월별 누적")
             OutlineCard {
@@ -132,16 +123,9 @@ fun UsageScreen(
                 }
                 monthly.forEachIndexed { index, month ->
                     if (index > 0) HorizontalDivider(color = AppColors.Outline)
-                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(monthLabel(month.month), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text(usageLine(month), fontSize = 13.sp, color = AppColors.TextSecondary)
-                        }
-                        Text(
-                            month.costUsd?.let(Pricing::formatUsd) ?: "단가 없음",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                        Text(monthLabel(month.month), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(usageLine(month), fontSize = 13.sp, color = AppColors.TextSecondary)
                     }
                 }
             }
@@ -153,38 +137,57 @@ fun UsageScreen(
                 }
                 recent.forEachIndexed { index, entry ->
                     if (index > 0) HorizontalDivider(color = AppColors.Outline)
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).padding(end = 8.dp)) {
-                            Text(
-                                entry.chapterTitle.ifBlank { entry.chapterUrl },
-                                fontSize = 15.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                "${entry.workTitle} · ${entry.modelName} · ${dateFormat.format(Date(entry.time))}",
-                                fontSize = 13.sp,
-                                color = AppColors.TextSecondary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                "입력 ${tokens(entry.inputTokens)} · 출력 ${tokens(entry.outputTokens)}" +
-                                    (if (entry.cacheReadTokens > 0) " · 캐시 읽기 ${tokens(entry.cacheReadTokens)}" else "") +
-                                    (if (entry.cacheWriteTokens > 0) " · 캐시 쓰기 ${tokens(entry.cacheWriteTokens)}" else "") +
-                                    (if (!entry.success) " · 실패" else ""),
-                                fontSize = 13.sp,
-                                color = if (entry.success) AppColors.TextSecondary else ErrorText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Text(entry.costUsd?.let(Pricing::formatUsd) ?: "—", fontSize = 15.sp)
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(
+                            entry.chapterTitle.ifBlank { entry.chapterUrl },
+                            fontSize = 15.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "${entry.workTitle} · ${entry.modelName} · ${dateFormat.format(Date(entry.time))}",
+                            fontSize = 13.sp,
+                            color = AppColors.TextSecondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "입력 ${tokens(entry.inputTokens)} · 출력 ${tokens(entry.outputTokens)}" +
+                                (if (entry.cacheReadTokens > 0) " · 캐시 읽기 ${tokens(entry.cacheReadTokens)}" else "") +
+                                (if (entry.cacheWriteTokens > 0) " · 캐시 쓰기 ${tokens(entry.cacheWriteTokens)}" else "") +
+                                (if (!entry.success) " · 실패" else ""),
+                            fontSize = 13.sp,
+                            color = if (entry.success) AppColors.TextSecondary else ErrorText,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
             }
             Column(Modifier.padding(bottom = 24.dp)) {}
         }
+    }
+}
+
+@Composable
+private fun TokenRow(label: String, count: Long) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 15.sp, color = AppColors.TextSecondary, modifier = Modifier.weight(1f))
+        Text("${tokens(count)} 토큰", fontSize = 15.sp)
+    }
+}
+
+@Composable
+private fun LinkRow(title: String, address: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(address, fontSize = 13.sp, color = AppColors.TextSecondary)
+        }
+        Icon(painterResource(R.drawable.ic_chevron_right), contentDescription = null, tint = AppColors.TextSecondary)
     }
 }
 
@@ -195,132 +198,3 @@ private fun usageLine(m: MonthlyUsage): String = buildList {
     if (m.cacheReadTokens > 0) add("캐시 읽기 ${tokens(m.cacheReadTokens)}")
     if (m.cacheWriteTokens > 0) add("캐시 쓰기 ${tokens(m.cacheWriteTokens)}")
 }.joinToString(" · ")
-
-/** 모델별 단가 목록 */
-@Composable
-fun PriceListScreen(
-    models: List<ModelInfo>,
-    custom: Map<String, ModelPrice>,
-    onBack: () -> Unit,
-    onEdit: (modelId: String) -> Unit,
-) {
-    // 모델 목록에 없더라도 직접 단가를 넣어 둔 모델은 함께 보여 준다.
-    val ids = remember(models, custom) { (models.map { it.id } + custom.keys).distinct() }
-    Column(Modifier.fillMaxSize().background(AppColors.Background).navigationBarsPadding()) {
-        BackTopBar("모델별 단가", onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            Text(
-                "토큰 100만 개당 달러입니다. 가격이 바뀌면 모델을 눌러 고치세요. " +
-                    "고친 값은 그 뒤의 번역부터 적용되고, 이미 기록된 금액은 바뀌지 않습니다.",
-                color = AppColors.TextSecondary,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(vertical = 12.dp),
-            )
-            OutlineCard {
-                if (ids.isEmpty()) {
-                    Text(
-                        "모델 목록이 없습니다. 설정 > AI 설정에서 모델 목록을 먼저 불러오세요.",
-                        color = AppColors.TextSecondary,
-                        modifier = Modifier.padding(16.dp),
-                    )
-                }
-                ids.forEachIndexed { index, id ->
-                    if (index > 0) HorizontalDivider(color = AppColors.Outline)
-                    val price = Pricing.priceFor(id, custom)
-                    val label = models.firstOrNull { it.id == id }?.label ?: id
-                    Row(
-                        Modifier.fillMaxWidth().clickable { onEdit(id) }.padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                when {
-                                    price == null -> "단가 없음 · 눌러서 입력"
-                                    else -> "입력 $${Pricing.formatRate(price.input)} · 출력 $${Pricing.formatRate(price.output)}" +
-                                        if (id in custom) " · 직접 입력" else " · 기본값"
-                                },
-                                fontSize = 14.sp,
-                                color = if (price == null) WarnText else AppColors.TextSecondary,
-                            )
-                        }
-                        Icon(painterResource(R.drawable.ic_chevron_right), contentDescription = null, tint = AppColors.TextSecondary)
-                    }
-                }
-            }
-            Column(Modifier.padding(bottom = 24.dp)) {}
-        }
-    }
-}
-
-/**
- * 모델 하나의 단가를 고치는 화면.
- * @param current 지금 적용 중인 단가(직접 입력한 값 또는 기본값). 없으면 빈 칸으로 시작한다.
- * @param isCustom 직접 입력한 값을 쓰고 있는지(그렇다면 기본값으로 되돌리기 버튼을 보여 준다)
- */
-@Composable
-fun PriceEditScreen(
-    modelLabel: String,
-    modelId: String,
-    current: ModelPrice?,
-    isCustom: Boolean,
-    onBack: () -> Unit,
-    onSave: (ModelPrice) -> Unit,
-    onReset: () -> Unit,
-) {
-    fun initial(value: Double?) = value?.let(Pricing::formatRate).orEmpty()
-    var input by remember { mutableStateOf(initial(current?.input)) }
-    var output by remember { mutableStateOf(initial(current?.output)) }
-    var cacheRead by remember { mutableStateOf(initial(current?.cacheRead)) }
-    var write5m by remember { mutableStateOf(initial(current?.cacheWrite5m)) }
-    var write1h by remember { mutableStateOf(initial(current?.cacheWrite1h)) }
-
-    fun parse(text: String): Double? = text.trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 && it.isFinite() }
-    val values = listOf(input, output, cacheRead, write5m, write1h).map(::parse)
-    val valid = values.all { it != null }
-
-    Column(Modifier.fillMaxSize().background(AppColors.Background).navigationBarsPadding().imePadding()) {
-        BackTopBar("단가 수정", onBack)
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
-            Text(modelLabel, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
-            Text(modelId, fontSize = 13.sp, color = AppColors.TextSecondary, fontFamily = FontFamily.Monospace)
-            Text(
-                "토큰 100만 개당 달러로 입력합니다.",
-                color = AppColors.TextSecondary,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-            )
-            RateField("입력", input) { input = it }
-            RateField("출력", output) { output = it }
-            RateField("캐시 읽기", cacheRead) { cacheRead = it }
-            RateField("캐시 쓰기 (5분 유지)", write5m) { write5m = it }
-            RateField("캐시 쓰기 (1시간 유지)", write1h) { write1h = it }
-            if (!valid) {
-                Text("모든 칸에 0 이상의 숫자를 입력하세요.", color = ErrorText, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
-            }
-            if (isCustom) {
-                TextButton(onClick = onReset, modifier = Modifier.padding(top = 4.dp)) { Text("기본값으로 되돌리기") }
-            }
-        }
-        PrimaryButton(
-            text = "저장하기",
-            enabled = valid,
-            onClick = { onSave(ModelPrice(values[0]!!, values[1]!!, values[2]!!, values[3]!!, values[4]!!)) },
-            modifier = Modifier.padding(16.dp),
-        )
-    }
-}
-
-@Composable
-private fun RateField(label: String, value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        prefix = { Text("$") },
-        singleLine = true,
-        shape = RoundedCornerShape(12.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-    )
-}

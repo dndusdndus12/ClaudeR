@@ -14,7 +14,6 @@ import com.clauder.reader.ai.TokenUsage
 import com.clauder.reader.ai.TranslationRequest
 import com.clauder.reader.browser.BrowserController
 import com.clauder.reader.data.ApiKeyEntry
-import com.clauder.reader.data.Pricing
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.data.WorkRepository
 import com.clauder.reader.data.db.ChapterEntity
@@ -64,8 +63,6 @@ data class ReaderState(
     /** 이번 회차에 보낸 용어집 항목 수 */
     val glossaryTerms: Int = 0,
     val usage: TokenUsage? = null,
-    /** 이 번역의 추정 비용(달러). 단가를 모르면 null. */
-    val costUsd: Double? = null,
     val modelName: String = "",
     /** 기기에 저장해 둔 번역을 다시 보여 준 것인지(API 를 다시 부르지 않음) */
     val fromCache: Boolean = false,
@@ -184,7 +181,6 @@ class ReaderController(
             phase = ReaderPhase.DONE,
             text = saved.translation,
             usage = TokenUsage(saved.inputTokens, saved.outputTokens, saved.cacheWriteTokens, saved.cacheReadTokens),
-            costUsd = saved.costUsd,
             modelName = saved.modelName,
             glossaryTerms = saved.glossaryTerms,
             chunkCount = saved.chunkCount,
@@ -458,10 +454,8 @@ class ReaderController(
             }
             val text = done.toString().trimEnd()
             Log.i(TAG, "translate done chunks=${chunks.size} terms=${sentTerms.size} usage=$usage chars=${text.length}")
-            // 추정 비용: 지금의 단가(직접 입력한 값이 있으면 그것, 없으면 기본 단가표)로 계산한다.
-            val cost = Pricing.priceFor(model.id, settings.modelPrices.first())?.let { Pricing.cost(usage, it, cacheTtl) }
-            update(url) { copy(phase = ReaderPhase.DONE, text = text, usage = usage, costUsd = cost, retrying = false) }
-            app.usage.record(work, chapter, model, usage, cacheTtl, cost, success = true)
+            update(url) { copy(phase = ReaderPhase.DONE, text = text, usage = usage, retrying = false) }
+            app.usage.record(work, chapter, model, usage, cacheTtl, success = true)
 
             // 다시 열 때 API 를 부르지 않도록 기기에 저장한다.
             val now = System.currentTimeMillis()
@@ -485,7 +479,6 @@ class ReaderController(
                     createdAt = now,
                     translatedAt = now,
                     readAt = now,
-                    costUsd = cost,
                 ),
             )
             return true
@@ -495,8 +488,7 @@ class ReaderController(
             Log.w(TAG, "번역 실패: ${e.javaClass.simpleName} ${e.message}")
             // 실패했어도 받은 만큼은 요금이 나가므로 사용 기록에 남긴다.
             if (usage != TokenUsage()) {
-                val cost = Pricing.priceFor(model.id, settings.modelPrices.first())?.let { Pricing.cost(usage, it, cacheTtl) }
-                app.usage.record(work, chapter, model, usage, cacheTtl, cost, success = false)
+                app.usage.record(work, chapter, model, usage, cacheTtl, success = false)
             }
             update(url) {
                 copy(

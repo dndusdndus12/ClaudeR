@@ -75,7 +75,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clauder.reader.R
 import com.clauder.reader.ai.TokenUsage
-import com.clauder.reader.data.Pricing
 import com.clauder.reader.data.ReadingPosition
 import com.clauder.reader.data.TapZone
 import com.clauder.reader.data.ViewerSettings
@@ -578,8 +577,7 @@ private fun usageSummary(state: ReaderState): String? {
         if (state.glossaryTerms > 0) add("용어집 ${state.glossaryTerms}개 적용")
         if (state.chunkCount > 1) add("${state.chunkCount}부분으로 나눠 번역")
     }.joinToString(" · ")
-    val cost = state.costUsd?.let { " · 약 " + Pricing.formatUsd(it) }.orEmpty()
-    return prefix + usageText(usage) + cost + if (details.isNotBlank()) "\n$details" else ""
+    return prefix + usageText(usage) + if (details.isNotBlank()) "\n$details" else ""
 }
 
 private fun usageText(u: TokenUsage): String {

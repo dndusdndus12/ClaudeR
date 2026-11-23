@@ -78,13 +78,6 @@ class SettingsStore(private val context: Context) {
     val globalGlossary: Flow<String> = string(KEY_GLOBAL_GLOSSARY)
     suspend fun setGlobalGlossary(text: String) = setString(KEY_GLOBAL_GLOSSARY, text)
 
-    /** 사용자가 직접 입력한 모델별 단가(모델 id → 단가). 없는 모델은 앱의 기본 단가표를 쓴다. */
-    val modelPrices: Flow<Map<String, ModelPrice>> = string(KEY_MODEL_PRICES).map { raw ->
-        runCatching { json.decodeFromString<Map<String, ModelPrice>>(raw) }.getOrDefault(emptyMap())
-    }
-
-    suspend fun setModelPrices(prices: Map<String, ModelPrice>) = setString(KEY_MODEL_PRICES, json.encodeToString(prices))
-
     // ---------- 뷰어 ----------
 
     val viewerSettings: Flow<ViewerSettings> = string(KEY_VIEWER).map { raw ->
@@ -106,7 +99,6 @@ class SettingsStore(private val context: Context) {
         private const val KEY_AI_CACHE_TTL = "ai_cache_ttl"
         private const val KEY_PREFETCH_NEXT = "prefetch_next"
         private const val KEY_VIEWER = "viewer_settings_json"
-        private const val KEY_MODEL_PRICES = "model_prices_json"
         private const val KEY_GLOBAL_PROMPT = "global_prompt"
         private const val KEY_GLOBAL_GLOSSARY = "global_glossary"
         private const val KEY_SITE_RULES = "site_rules_json"

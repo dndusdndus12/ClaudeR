@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.AutoMigration
 import androidx.room.Dao
 import androidx.room.Database
+import androidx.room.DeleteColumn
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.Insert
@@ -12,6 +13,7 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Upsert
+import androidx.room.migration.AutoMigrationSpec
 import kotlinx.coroutines.flow.Flow
 
 /** 번역해서 읽은 작품 하나와 그 작품 전용 설정. */
@@ -74,13 +76,11 @@ data class ChapterEntity(
     val translatedAt: Long,
     /** 마지막으로 읽은 시각 */
     val readAt: Long,
-    /** 이 번역의 추정 비용(달러). 번역할 때 단가를 몰랐으면 null. */
-    val costUsd: Double? = null,
 )
 
 /**
- * 번역 요청 한 번(회차 하나)의 사용 기록. 월별 누적 비용을 내는 데 쓴다.
- * 비용은 요청할 때의 단가로 계산해 함께 적어 두므로, 나중에 단가를 바꿔도 지난 기록은 변하지 않는다.
+ * 번역 요청 한 번(회차 하나)의 사용 기록. 월별 토큰 합계를 내는 데 쓴다.
+ * API 가 응답으로 알려 준 토큰 수만 적는다(금액은 앱이 정확히 알 수 없어 적지 않는다).
  */
 @Entity(tableName = "usage_log", indices = [Index("time")])
 data class UsageLogEntity(
@@ -98,8 +98,6 @@ data class UsageLogEntity(
     val cacheReadTokens: Long,
     /** 캐시에 쓸 때의 유지 시간("5m" 또는 "1h") */
     val cacheTtl: String,
-    /** 추정 비용(달러). 단가를 몰랐으면 null. */
-    val costUsd: Double?,
     /** 번역이 끝까지 됐는지(실패해도 쓴 만큼은 요금이 나간다) */
     val success: Boolean,
 )
@@ -123,10 +121,6 @@ data class MonthlyUsage(
     val outputTokens: Long,
     val cacheWriteTokens: Long,
     val cacheReadTokens: Long,
-    /** 단가를 아는 요청들의 비용 합. 하나도 없으면 null. */
-    val costUsd: Double?,
-    /** 단가를 몰라 비용에 넣지 못한 요청 수 */
-    val unpriced: Int,
 )
 
 @Dao
@@ -187,9 +181,7 @@ interface UsageDao {
         "SELECT strftime('%Y-%m', time / 1000, 'unixepoch', 'localtime') AS month, " +
             "COUNT(*) AS requests, " +
             "SUM(inputTokens) AS inputTokens, SUM(outputTokens) AS outputTokens, " +
-            "SUM(cacheWriteTokens) AS cacheWriteTokens, SUM(cacheReadTokens) AS cacheReadTokens, " +
-            "SUM(costUsd) AS costUsd, " +
-            "SUM(CASE WHEN costUsd IS NULL THEN 1 ELSE 0 END) AS unpriced " +
+            "SUM(cacheWriteTokens) AS cacheWriteTokens, SUM(cacheReadTokens) AS cacheReadTokens " +
             "FROM usage_log GROUP BY month ORDER BY month DESC",
     )
     fun observeMonthly(): Flow<List<MonthlyUsage>>
@@ -200,16 +192,23 @@ interface UsageDao {
 
 @Database(
     entities = [WorkEntity::class, ChapterEntity::class, UsageLogEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true,
     autoMigrations = [
         // 1(작품만) → 2: 회차 테이블 추가
         AutoMigration(from = 1, to = 2),
         // 2 → 3: 사용 기록 테이블과 회차의 추정 비용 칸 추가
         AutoMigration(from = 2, to = 3),
+        // 3 → 4: 추정 비용 칸 삭제(토큰 수만 남긴다). 저장된 번역과 사용 기록은 그대로 옮겨진다.
+        AutoMigration(from = 3, to = 4, spec = AppDatabase.DropCostColumns::class),
     ],
 )
 abstract class AppDatabase : RoomDatabase() {
+
+    @DeleteColumn(tableName = "chapters", columnName = "costUsd")
+    @DeleteColumn(tableName = "usage_log", columnName = "costUsd")
+    class DropCostColumns : AutoMigrationSpec
+
     abstract fun workDao(): WorkDao
     abstract fun chapterDao(): ChapterDao
     abstract fun usageDao(): UsageDao

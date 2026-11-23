@@ -63,7 +63,6 @@ import com.clauder.reader.browser.BrowserScreen
 import com.clauder.reader.data.BackupCodec
 import com.clauder.reader.data.BackupFormatException
 import com.clauder.reader.data.BackupManager
-import com.clauder.reader.data.Pricing
 import com.clauder.reader.data.SettingsBackup
 import com.clauder.reader.data.SettingsStore
 import com.clauder.reader.data.SiteRule
@@ -81,11 +80,9 @@ import com.clauder.reader.ui.preview.ExtractionPreviewScreen
 import com.clauder.reader.ui.settings.AiKeysScreen
 import com.clauder.reader.ui.settings.AiSettingsScreen
 import com.clauder.reader.ui.settings.LongTextEditScreen
-import com.clauder.reader.ui.settings.PriceEditScreen
-import com.clauder.reader.ui.settings.PriceListScreen
 import com.clauder.reader.ui.settings.PromptHubScreen
 import com.clauder.reader.ui.settings.UsageScreen
-import com.clauder.reader.ui.settings.currentMonthKey
+import com.clauder.reader.ui.settings.usageSummaryLine
 import com.clauder.reader.ui.settings.SettingsScreen
 import com.clauder.reader.ui.settings.SiteRuleEditScreen
 import com.clauder.reader.ui.settings.SiteRulesScreen
@@ -272,8 +269,6 @@ private sealed interface Screen {
     data object ViewerSettings : Screen
     data class ChapterList(val workKey: String) : Screen
     data object Usage : Screen
-    data object PriceList : Screen
-    data class PriceEdit(val modelId: String) : Screen
     data object EditGlobalPrompt : Screen
     data object EditGlobalGlossary : Screen
     data class WorkSettings(val workKey: String) : Screen
@@ -324,10 +319,9 @@ private fun AppRoot(
     val lastSavedList by app.works.worksWithLastChapterSaved.collectAsState(initial = emptyList())
     val lastChapterSaved = remember(lastSavedList) { lastSavedList.toSet() }
 
-    // 비용
+    // 토큰 사용량
     val monthlyUsage by app.usage.monthly.collectAsState(initial = emptyList())
     val recentUsage by remember { app.usage.recent(30) }.collectAsState(initial = emptyList())
-    val customPrices by settings.modelPrices.collectAsState(initial = emptyMap())
 
     // 설정 내보내기와 가져오기
     val context = LocalContext.current
@@ -520,9 +514,7 @@ private fun AppRoot(
             onOpenPrompts = { stack.add(Screen.PromptHub) },
             viewerSummary = viewerSummary(viewerSettings),
             onOpenViewerSettings = { stack.add(Screen.ViewerSettings) },
-            usageSummary = monthlyUsage.firstOrNull { it.month == currentMonthKey() }
-                ?.let { "이번 달 ${it.costUsd?.let(Pricing::formatUsd) ?: "단가 없음"} · 번역 ${it.requests}회" }
-                ?: "이번 달 기록 없음",
+            usageSummary = usageSummaryLine(monthlyUsage),
             onOpenUsage = { stack.add(Screen.Usage) },
             onExport = { exportLauncher.launch("clauder-settings.json") },
             onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
@@ -653,30 +645,6 @@ private fun AppRoot(
                         monthly = monthlyUsage,
                         recent = recentUsage,
                         onBack = ::pop,
-                        onOpenPrices = { stack.add(Screen.PriceList) },
-                    )
-
-                    Screen.PriceList -> PriceListScreen(
-                        models = models,
-                        custom = customPrices,
-                        onBack = ::pop,
-                        onEdit = { stack.add(Screen.PriceEdit(it)) },
-                    )
-
-                    is Screen.PriceEdit -> PriceEditScreen(
-                        modelLabel = models.firstOrNull { it.id == top.modelId }?.label ?: top.modelId,
-                        modelId = top.modelId,
-                        current = Pricing.priceFor(top.modelId, customPrices),
-                        isCustom = top.modelId in customPrices,
-                        onBack = ::pop,
-                        onSave = { price ->
-                            scope.launch { settings.setModelPrices(customPrices + (top.modelId to price)) }
-                            pop()
-                        },
-                        onReset = {
-                            scope.launch { settings.setModelPrices(customPrices - top.modelId) }
-                            pop()
-                        },
                     )
 
                     is Screen.ChapterList -> {
@@ -817,7 +785,7 @@ private fun ImportConfirmDialog(backup: SettingsBackup, onConfirm: () -> Unit, o
         text = {
             Text(
                 "이 파일의 내용:\n${backup.summary()}\n\n" +
-                    "지금의 프롬프트, 용어집, 사이트 규칙, 뷰어 설정, 단가가 파일의 내용으로 바뀝니다. " +
+                    "지금의 프롬프트, 용어집, 사이트 규칙, 뷰어 설정이 파일의 내용으로 바뀝니다. " +
                     "저장된 번역, 읽던 위치, API 키는 그대로 유지됩니다.",
             )
         },

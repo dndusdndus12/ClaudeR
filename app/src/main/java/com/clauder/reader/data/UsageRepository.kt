@@ -18,14 +18,13 @@ class UsageRepository(private val dao: UsageDao) {
 
     fun recent(limit: Int = 30): Flow<List<UsageLogEntity>> = dao.observeRecent(limit)
 
-    /** 번역 한 번의 사용량을 기록한다. 비용은 지금의 단가로 계산해 함께 적는다. */
+    /** 번역 한 번의 토큰 사용량을 기록한다. */
     suspend fun record(
         work: WorkEntity,
         chapter: ExtractedChapter,
         model: ModelInfo,
         usage: TokenUsage,
         cacheTtl: String,
-        costUsd: Double?,
         success: Boolean,
     ) {
         dao.insert(
@@ -42,7 +41,6 @@ class UsageRepository(private val dao: UsageDao) {
                 cacheWriteTokens = usage.cacheWriteTokens,
                 cacheReadTokens = usage.cacheReadTokens,
                 cacheTtl = cacheTtl,
-                costUsd = costUsd,
                 success = success,
             ),
         )
@@ -67,7 +65,6 @@ object BackupManager {
             aiEffort = settings.aiEffort.first(),
             aiCacheTtl = settings.aiCacheTtl.first(),
             prefetchNext = settings.prefetchNext.first(),
-            modelPrices = settings.modelPrices.first(),
             works = app.works.exportSettings(),
         )
     }
@@ -84,7 +81,6 @@ object BackupManager {
         settings.setAiEffort(backup.aiEffort)
         if (backup.aiCacheTtl.isNotBlank()) settings.setAiCacheTtl(backup.aiCacheTtl)
         settings.setPrefetchNext(backup.prefetchNext)
-        settings.setModelPrices(backup.modelPrices)
         app.works.importSettings(backup.works)
     }
 }
