@@ -1,8 +1,12 @@
 package com.clauder.reader.ui.viewer
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -45,6 +50,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -54,12 +60,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clauder.reader.R
@@ -75,6 +86,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
+import kotlin.math.roundToInt
 
 /**
  * 뷰어가 화면 밖(액티비티)에서 받아야 하는 페이지 넘김 입력.
@@ -94,6 +106,9 @@ private val ErrorBg = Color(0xFFFDECEC)
 private val ErrorText = Color(0xFFC62828)
 private val TopBarHeight = 52.dp
 private val BottomBarHeight = 62.dp
+
+/** 페이지 넘김 애니메이션 시간(ms). 빠르게 연달아 넘겨도 답답하지 않을 만큼 짧게 둔다. */
+private const val PageSlideMillis = 220
 
 /**
  * 번역문을 읽는 화면.
@@ -169,9 +184,17 @@ fun ViewerScreen(
     val latestBars by rememberUpdatedState(barsVisible)
     val latestNext by rememberUpdatedState(onNext)
 
+    // 페이지 넘김 애니메이션: 넘기기 직전의 화면을 그림으로 찍어 글 위에 덮고,
+    // 그 그림을 옆으로 밀어내면 아래에 이미 넘어가 있는 새 화면이 드러난다.
+    val pageLayer = rememberGraphicsLayer()
+    var leavingPage by remember { mutableStateOf<ImageBitmap?>(null) }
+    val leavingOffset = remember { Animatable(0f) }
+    var turnCount by remember { mutableIntStateOf(0) }
+
     fun turnPage(forward: Boolean) {
         val current = latestState
         if (current.phase == ReaderPhase.LOADING_PAGE) return
+        if (!forward && !listState.canScrollBackward) return
         if (forward && !listState.canScrollForward) {
             // 회차 끝: 설정에 따라 다음 화로 넘어간다.
             val canAdvance = current.phase == ReaderPhase.DONE && current.chapter?.hasNext == true
@@ -187,7 +210,25 @@ fun ViewerScreen(
                 overlapLines = latestSettings.pageOverlapLines,
             )
         }
-        scope.launch { listState.scrollBy(if (forward) distance else -distance) }
+        val turn = ++turnCount
+        scope.launch {
+            val snapshot = if (latestSettings.pageAnimation) runCatching { pageLayer.toImageBitmap() }.getOrNull() else null
+            if (snapshot != null) {
+                leavingOffset.snapTo(0f)
+                leavingPage = snapshot
+            }
+            val moved = listState.scrollBy(if (forward) distance else -distance)
+            try {
+                // 다음 화면으로 갈 때는 기존 화면이 왼쪽으로, 이전 화면으로 갈 때는 오른쪽으로 밀려난다.
+                if (snapshot != null && moved != 0f) {
+                    val width = listState.layoutInfo.viewportSize.width.toFloat()
+                    leavingOffset.animateTo(if (forward) -width else width, tween(PageSlideMillis, easing = FastOutSlowInEasing))
+                }
+            } finally {
+                // 애니메이션 도중에 또 넘기면 새 넘김이 자기 그림을 올려 두므로, 그때는 지우지 않는다.
+                if (turnCount == turn) leavingPage = null
+            }
+        }
     }
 
     DisposableEffect(settings.volumeKeyPaging, settings.remoteSwipePaging, settings.remoteSwipeReversed) {
@@ -207,6 +248,11 @@ fun ViewerScreen(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
+                .drawWithContent {
+                    // 화면에 그리는 내용을 그대로 기록해 두었다가 넘길 때 그림으로 꺼내 쓴다.
+                    pageLayer.record { this@drawWithContent.drawContent() }
+                    drawLayer(pageLayer)
+                }
                 .pointerInput(settings.tapPaging) {
                     detectTapGestures { offset ->
                         when (ViewerTaps.zoneOf(offset.y, size.height.toFloat(), settings.tapPaging)) {
@@ -249,6 +295,18 @@ fun ViewerScreen(
             item(key = "status") {
                 StatusFooter(state, palette, onRetranslate, onOpenAiSettings)
             }
+        }
+
+        // 밀려나는 기존 화면. 바탕색을 깔아 아래의 새 화면과 글자가 겹쳐 보이지 않게 한다.
+        leavingPage?.let { page ->
+            Image(
+                bitmap = page,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(leavingOffset.value.roundToInt(), 0) }
+                    .background(palette.background),
+            )
         }
 
         // 막대를 숨겼을 때 글이 상태 표시줄과 시스템 버튼 밑으로 비쳐 보이지 않게 가린다.

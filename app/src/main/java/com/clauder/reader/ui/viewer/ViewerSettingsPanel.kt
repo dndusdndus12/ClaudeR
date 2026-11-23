@@ -146,6 +146,12 @@ fun ViewerSettingsPanel(settings: ViewerSettings, onChange: (ViewerSettings) -> 
             modifier = Modifier.padding(bottom = 6.dp),
         )
         Toggle(
+            title = "페이지 넘김 애니메이션",
+            detail = "한 화면을 넘길 때 기존 화면이 옆으로 밀려나며 넘어갔음을 보여 줍니다.",
+            checked = settings.pageAnimation,
+            onChange = { onChange(settings.copy(pageAnimation = it)) },
+        )
+        Toggle(
             title = "볼륨 키로 페이지 넘김",
             detail = "볼륨 아래는 다음 화면, 위는 이전 화면. 블루투스 리모컨도 같은 방식으로 동작합니다.",
             checked = settings.volumeKeyPaging,

@@ -28,6 +28,8 @@ data class ViewerSettings(
     val remoteSwipeReversed: Boolean = false,
     /** 한 화면을 넘길 때 앞 화면과 겹쳐 보이게 남기는 줄 수 */
     val pageOverlapLines: Int = 3,
+    /** 한 화면을 넘길 때 기존 화면이 옆으로 밀려나는 애니메이션을 보여 줄지 */
+    val pageAnimation: Boolean = true,
 ) {
     /** 저장된 값이 범위를 벗어나 있어도 화면이 깨지지 않게 맞춘다. */
     fun sanitized() = copy(
