@@ -32,9 +32,11 @@ fun SettingsScreen(
     siteRuleCount: Int,
     aiSummary: String,
     promptSummary: String,
+    viewerSummary: String,
     onOpenSiteRules: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenPrompts: () -> Unit,
+    onOpenViewerSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -65,7 +67,7 @@ fun SettingsScreen(
 
         SectionTitle("읽기")
         OutlineCard {
-            SettingsRow("뷰어 설정", "준비 중 (M5)", null)
+            SettingsRow("뷰어 설정", viewerSummary, onOpenViewerSettings)
         }
 
         Text(

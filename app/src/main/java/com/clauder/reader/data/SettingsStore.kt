@@ -74,6 +74,14 @@ class SettingsStore(private val context: Context) {
     val globalGlossary: Flow<String> = string(KEY_GLOBAL_GLOSSARY)
     suspend fun setGlobalGlossary(text: String) = setString(KEY_GLOBAL_GLOSSARY, text)
 
+    // ---------- 뷰어 ----------
+
+    val viewerSettings: Flow<ViewerSettings> = string(KEY_VIEWER).map { raw ->
+        runCatching { json.decodeFromString<ViewerSettings>(raw) }.getOrDefault(ViewerSettings()).sanitized()
+    }
+
+    suspend fun setViewerSettings(value: ViewerSettings) = setString(KEY_VIEWER, json.encodeToString(value.sanitized()))
+
     /** 암호화된 API 키 묶음. [ApiKeyStore] 만 사용한다. */
     val encryptedApiKeys: Flow<String> = string(KEY_API_KEYS)
     suspend fun setEncryptedApiKeys(value: String) = setString(KEY_API_KEYS, value)
@@ -85,6 +93,7 @@ class SettingsStore(private val context: Context) {
          */
         const val DEFAULT_CACHE_TTL = "1h"
         private const val KEY_AI_CACHE_TTL = "ai_cache_ttl"
+        private const val KEY_VIEWER = "viewer_settings_json"
         private const val KEY_GLOBAL_PROMPT = "global_prompt"
         private const val KEY_GLOBAL_GLOSSARY = "global_glossary"
         private const val KEY_SITE_RULES = "site_rules_json"

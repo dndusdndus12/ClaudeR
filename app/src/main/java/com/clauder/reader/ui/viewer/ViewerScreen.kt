@@ -1,16 +1,26 @@
 package com.clauder.reader.ui.viewer
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -19,18 +29,31 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -38,137 +61,269 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clauder.reader.R
 import com.clauder.reader.ai.TokenUsage
+import com.clauder.reader.data.TapZone
+import com.clauder.reader.data.ViewerSettings
+import com.clauder.reader.data.ViewerTaps
 import com.clauder.reader.translate.PromptBuilder
 import com.clauder.reader.translate.ReaderPhase
 import com.clauder.reader.translate.ReaderState
 import com.clauder.reader.ui.theme.AppColors
+import kotlinx.coroutines.launch
 import java.text.NumberFormat
 
-private val ViewerBackground = Color(0xFFF3F5F9)
 private val ErrorBg = Color(0xFFFDECEC)
 private val ErrorText = Color(0xFFC62828)
+private val TopBarHeight = 52.dp
+private val BottomBarHeight = 62.dp
 
-/** 번역문을 읽는 화면. 글꼴, 줄 간격, 테마 설정은 M5에서 추가한다. */
+/**
+ * 번역문을 읽는 화면.
+ * - 화면을 탭하면 위아래 막대가 숨겨지거나 다시 나타난다.
+ * - 볼륨 키(블루투스 리모컨)로 한 화면씩 넘긴다.
+ *
+ * @param registerPageKeys 페이지 넘김 키를 받을 함수를 등록한다(null 이면 해제). 인자는 "앞으로 넘기는지".
+ * @param setDarkSystemBars 어두운 테마일 때 상태 표시줄 아이콘을 밝게 바꾼다.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerScreen(
     state: ReaderState,
+    settings: ViewerSettings,
+    onSettingsChange: (ViewerSettings) -> Unit,
     onBack: () -> Unit,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onRetranslate: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenWorkSettings: () -> Unit,
+    registerPageKeys: (((forward: Boolean) -> Unit)?) -> Unit,
+    setDarkSystemBars: (Boolean) -> Unit,
 ) {
     val chapter = state.chapter
+    val palette = ViewerPalette.of(settings.theme)
     val translated = remember(state.text) { PromptBuilder.parseTranslation(state.text) }
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+
+    var barsWanted by rememberSaveable { mutableStateOf(true) }
+    var showSettings by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    // 오류가 났을 때는 조치할 수 있도록 막대를 항상 보여 준다.
+    val barsVisible = barsWanted || state.phase == ReaderPhase.ERROR
 
     // 다른 회차로 바뀌면 맨 위에서부터 읽도록 한다.
     LaunchedEffect(chapter?.url) { listState.scrollToItem(0) }
 
-    Column(Modifier.fillMaxSize().background(ViewerBackground)) {
-        // 위쪽: 뒤로 가기와 작품명
-        Row(
-            Modifier.fillMaxWidth().statusBarsPadding().height(52.dp).padding(horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "브라우저로 돌아가기")
-            }
-            Text(
-                chapter?.workTitle.orEmpty().ifBlank { "번역" },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-            )
-            if (state.workKey.isNotBlank()) {
-                TextButton(onClick = onOpenWorkSettings) { Text("작품 설정") }
-            }
-        }
-        HorizontalDivider(color = AppColors.Outline)
+    DisposableEffect(palette.dark) {
+        setDarkSystemBars(palette.dark)
+        onDispose { setDarkSystemBars(false) }
+    }
 
+    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    // 키 입력은 화면이 다시 그려진 뒤에도 최신 값을 봐야 하므로 최신 값을 가리키는 참조로 넘긴다.
+    val latestState by rememberUpdatedState(state)
+    val latestSettings by rememberUpdatedState(settings)
+    val latestBars by rememberUpdatedState(barsVisible)
+    val latestNext by rememberUpdatedState(onNext)
+
+    fun turnPage(forward: Boolean) {
+        val current = latestState
+        if (current.phase == ReaderPhase.LOADING_PAGE) return
+        if (forward && !listState.canScrollForward) {
+            // 회차 끝: 설정에 따라 다음 화로 넘어간다.
+            val canAdvance = current.phase == ReaderPhase.DONE && current.chapter?.hasNext == true
+            if (latestSettings.volumeKeyNextChapter && canAdvance) latestNext()
+            return
+        }
+        val distance = with(density) {
+            ViewerTaps.pageDistance(
+                viewportHeight = listState.layoutInfo.viewportSize.height.toFloat(),
+                coveredTop = (statusTop + if (latestBars) TopBarHeight else 0.dp).toPx(),
+                coveredBottom = (navBottom + if (latestBars) BottomBarHeight else 0.dp).toPx(),
+                lineHeight = latestSettings.lineHeight.sp.toPx(),
+            )
+        }
+        scope.launch { listState.scrollBy(if (forward) distance else -distance) }
+    }
+
+    DisposableEffect(settings.volumeKeyPaging) {
+        registerPageKeys(if (settings.volumeKeyPaging) ({ forward -> turnPage(forward) }) else null)
+        onDispose { registerPageKeys(null) }
+    }
+
+    Box(Modifier.fillMaxSize().background(palette.background)) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 22.dp, vertical = 20.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(settings.tapPaging) {
+                    detectTapGestures { offset ->
+                        when (ViewerTaps.zoneOf(offset.y, size.height.toFloat(), settings.tapPaging)) {
+                            TapZone.PREVIOUS_PAGE -> turnPage(forward = false)
+                            TapZone.NEXT_PAGE -> turnPage(forward = true)
+                            TapZone.TOGGLE_BARS -> barsWanted = !barsWanted
+                        }
+                    }
+                },
+            // 막대는 글 위에 떠 있으므로, 막대를 숨기거나 보여도 글의 위치가 움직이지 않는다.
+            // 대신 처음과 끝이 막대에 가려지지 않도록 위아래에 여유를 둔다.
+            contentPadding = PaddingValues(
+                start = settings.margin.dp,
+                end = settings.margin.dp,
+                top = statusTop + TopBarHeight + 16.dp,
+                bottom = navBottom + BottomBarHeight + 20.dp,
+            ),
         ) {
             if (state.phase != ReaderPhase.LOADING_PAGE) {
                 item(key = "title") {
                     Text(
                         translated.title.ifBlank { chapter?.chapterTitle.orEmpty() },
-                        fontSize = 22.sp,
-                        lineHeight = 32.sp,
+                        fontSize = (settings.fontSize + 3).sp,
+                        lineHeight = ((settings.fontSize + 3) * 1.45f).sp,
                         fontWeight = FontWeight.Bold,
-                        color = AppColors.TextPrimary,
+                        color = palette.text,
                         modifier = Modifier.padding(bottom = 20.dp),
                     )
                 }
                 itemsIndexed(translated.paragraphs) { _, paragraph ->
                     Text(
                         paragraph,
-                        fontSize = 19.sp,
-                        lineHeight = 32.sp,
-                        color = AppColors.TextPrimary,
-                        modifier = Modifier.padding(bottom = 18.dp),
+                        fontSize = settings.fontSize.sp,
+                        lineHeight = settings.lineHeight.sp,
+                        color = palette.text,
+                        modifier = Modifier.padding(bottom = (settings.fontSize * 0.9f).dp),
                     )
                 }
             }
             item(key = "status") {
-                StatusFooter(state, onRetranslate, onOpenAiSettings)
+                StatusFooter(state, palette, onRetranslate, onOpenAiSettings)
             }
         }
 
-        HorizontalDivider(color = AppColors.Outline)
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(AppColors.Background)
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            val moving = state.phase == ReaderPhase.LOADING_PAGE
-            OutlinedButton(
-                onClick = onPrev,
-                enabled = chapter?.hasPrev == true && !moving,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f).height(46.dp),
-            ) { Text("이전 화") }
-            TextButton(onClick = onRetranslate, enabled = chapter != null && !state.busy) {
-                Text("다시 번역")
+        // 막대를 숨겼을 때 글이 상태 표시줄과 시스템 버튼 밑으로 비쳐 보이지 않게 가린다.
+        Box(Modifier.fillMaxWidth().height(statusTop).background(palette.background).align(Alignment.TopCenter))
+        Box(Modifier.fillMaxWidth().height(navBottom).background(palette.background).align(Alignment.BottomCenter))
+
+        AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
+            Column(Modifier.fillMaxWidth().background(palette.bar).pointerInput(Unit) {}) {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().height(TopBarHeight).padding(horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(painterResource(R.drawable.ic_arrow_back), contentDescription = "브라우저로 돌아가기", tint = palette.text)
+                    }
+                    Text(
+                        chapter?.workTitle.orEmpty().ifBlank { "번역" },
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = palette.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    )
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(painterResource(R.drawable.ic_more_vert), contentDescription = "더 보기", tint = palette.text)
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("다시 번역") },
+                                enabled = chapter != null && !state.busy,
+                                onClick = {
+                                    menuOpen = false
+                                    onRetranslate()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("작품 설정 (프롬프트, 용어집)") },
+                                enabled = state.workKey.isNotBlank(),
+                                onClick = {
+                                    menuOpen = false
+                                    onOpenWorkSettings()
+                                },
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(color = palette.divider)
             }
-            Button(
-                onClick = onNext,
-                enabled = chapter?.hasNext == true && !moving,
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AppColors.Blue),
-                modifier = Modifier.weight(1f).height(46.dp),
-            ) { Text("다음 화", fontWeight = FontWeight.SemiBold) }
+        }
+
+        AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+            Column(Modifier.fillMaxWidth().background(palette.bar).pointerInput(Unit) {}) {
+                HorizontalDivider(color = palette.divider)
+                Row(
+                    Modifier.fillMaxWidth().navigationBarsPadding().height(BottomBarHeight).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    val moving = state.phase == ReaderPhase.LOADING_PAGE
+                    OutlinedButton(
+                        onClick = onPrev,
+                        enabled = chapter?.hasPrev == true && !moving,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f).height(46.dp),
+                    ) { Text("이전 화", color = if (chapter?.hasPrev == true && !moving) palette.text else palette.secondary) }
+                    TextButton(onClick = { showSettings = true }) {
+                        Text("뷰어 설정", color = AppColors.Blue)
+                    }
+                    Button(
+                        onClick = onNext,
+                        enabled = chapter?.hasNext == true && !moving,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AppColors.Blue),
+                        modifier = Modifier.weight(1f).height(46.dp),
+                    ) { Text("다음 화", fontWeight = FontWeight.SemiBold) }
+                }
+            }
+        }
+    }
+
+    if (showSettings) {
+        ModalBottomSheet(onDismissRequest = { showSettings = false }, containerColor = AppColors.Background) {
+            ViewerSettingsPanel(
+                settings = settings,
+                onChange = onSettingsChange,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun StatusFooter(state: ReaderState, onRetranslate: () -> Unit, onOpenAiSettings: () -> Unit) {
+private fun StatusFooter(
+    state: ReaderState,
+    palette: ViewerPalette,
+    onRetranslate: () -> Unit,
+    onOpenAiSettings: () -> Unit,
+) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp)) {
         when (state.phase) {
-            ReaderPhase.LOADING_PAGE -> Progress("다음 화를 불러오는 중…")
+            ReaderPhase.LOADING_PAGE -> Progress("다음 화를 불러오는 중…", palette)
             ReaderPhase.REQUESTING -> Progress(
                 (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state),
+                palette,
             )
-            ReaderPhase.THINKING -> Progress("모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다." + part(state))
-            ReaderPhase.STREAMING -> Progress("번역 중…" + part(state))
-            ReaderPhase.DONE -> UsageLine(state)
+
+            ReaderPhase.THINKING -> Progress("모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다." + part(state), palette)
+            ReaderPhase.STREAMING -> Progress("번역 중…" + part(state), palette)
+            ReaderPhase.DONE -> UsageLine(state, palette)
 
             ReaderPhase.ERROR -> {
                 Column(
                     Modifier.fillMaxWidth().background(ErrorBg, RoundedCornerShape(12.dp)).padding(14.dp),
                 ) {
                     Text("번역하지 못했습니다", fontWeight = FontWeight.Bold, color = ErrorText)
-                    Text(state.error.orEmpty(), fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text(
+                        state.error.orEmpty(),
+                        fontSize = 14.sp,
+                        color = AppColors.TextPrimary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                     Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (state.needsSetup) {
                             Button(
@@ -182,7 +337,7 @@ private fun StatusFooter(state: ReaderState, onRetranslate: () -> Unit, onOpenAi
                         }
                     }
                 }
-                UsageLine(state)
+                UsageLine(state, palette)
             }
         }
     }
@@ -193,15 +348,15 @@ private fun part(state: ReaderState): String =
     if (state.chunkCount > 1 && state.chunkIndex > 0) " (${state.chunkIndex}/${state.chunkCount})" else ""
 
 @Composable
-private fun Progress(label: String) {
+private fun Progress(label: String, palette: ViewerPalette) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = AppColors.Blue)
-        Text(label, fontSize = 14.sp, color = AppColors.TextSecondary, modifier = Modifier.padding(start = 10.dp))
+        Text(label, fontSize = 14.sp, color = palette.secondary, modifier = Modifier.padding(start = 10.dp))
     }
 }
 
 @Composable
-private fun UsageLine(state: ReaderState) {
+private fun UsageLine(state: ReaderState, palette: ViewerPalette) {
     val usage = state.usage ?: return
     val prefix = if (state.fromCache) "저장된 번역 · " else ""
     val details = buildList {
@@ -213,7 +368,7 @@ private fun UsageLine(state: ReaderState) {
         prefix + usageText(usage) + if (details.isNotBlank()) "\n$details" else "",
         fontSize = 12.sp,
         lineHeight = 18.sp,
-        color = AppColors.TextSecondary,
+        color = palette.secondary,
         modifier = Modifier.padding(top = 12.dp),
     )
 }

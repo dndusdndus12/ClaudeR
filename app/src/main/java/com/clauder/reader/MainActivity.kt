@@ -3,6 +3,7 @@ package com.clauder.reader
 import android.content.Intent
 import android.graphics.Color as AndroidColor
 import android.os.Bundle
+import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -50,6 +51,7 @@ import com.clauder.reader.browser.BrowserController
 import com.clauder.reader.browser.BrowserScreen
 import com.clauder.reader.data.SettingsStore
 import com.clauder.reader.data.SiteRule
+import com.clauder.reader.data.ViewerSettings as ViewerSettingsData
 import com.clauder.reader.data.db.WorkEntity
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
@@ -68,6 +70,7 @@ import com.clauder.reader.ui.settings.WorkSettingsScreen
 import com.clauder.reader.ui.theme.AppColors
 import com.clauder.reader.ui.theme.ClauderTheme
 import com.clauder.reader.ui.viewer.ViewerScreen
+import com.clauder.reader.ui.viewer.ViewerSettingsScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -79,11 +82,12 @@ class MainActivity : ComponentActivity() {
     /** 브라우저 화면 아래쪽에 보여 줄 안내(추출 실패 등). 값이 생기면 브라우저 화면으로 돌아간다. */
     private val browserNotice = mutableStateOf<String?>(null)
 
+    /** 뷰어가 열려 있고 키 넘김이 켜져 있을 때만 값이 있다. 인자는 "앞으로 넘기는지". */
+    private var pageKeyHandler: ((forward: Boolean) -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // 앱 화면이 항상 밝은 배경이므로, 폰이 다크 모드여도 상태 표시줄 아이콘을 어둡게 고정한다.
-        val lightBars = SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
-        enableEdgeToEdge(statusBarStyle = lightBars, navigationBarStyle = lightBars)
+        applySystemBars(dark = false)
 
         val app = application as ClauderApp
         browser = BrowserController(this) { url ->
@@ -99,9 +103,48 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             ClauderTheme {
-                AppRoot(app, browser, reader, browserNotice)
+                AppRoot(
+                    app = app,
+                    browser = browser,
+                    reader = reader,
+                    browserNotice = browserNotice,
+                    registerPageKeys = { handler -> pageKeyHandler = handler },
+                    setDarkSystemBars = ::applySystemBars,
+                )
             }
         }
+    }
+
+    /**
+     * 상태 표시줄과 시스템 버튼의 아이콘 색을 정한다. 앱 화면은 밝은 배경이라 어두운 아이콘을 쓰고,
+     * 뷰어가 어두운 테마일 때만 밝은 아이콘으로 바꾼다(폰의 다크 모드 설정과는 무관하게).
+     */
+    private fun applySystemBars(dark: Boolean) {
+        val style = if (dark) {
+            SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+        } else {
+            SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+        }
+        enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+    }
+
+    /**
+     * 볼륨 키와 리모컨의 페이지 키를 뷰어의 페이지 넘김으로 돌린다.
+     * 누름과 뗌을 모두 가로채야 볼륨 조절 창이 뜨지 않는다.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val handler = pageKeyHandler
+        val forward = when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT -> true
+            KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> false
+            else -> null
+        }
+        if (handler != null && forward != null) {
+            // 길게 눌러 생기는 반복 입력은 무시한다(한 번 누를 때 한 화면).
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) handler(forward)
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -147,6 +190,7 @@ private sealed interface Screen {
     data object AiSettings : Screen
     data class AiKeys(val providerId: String) : Screen
     data object PromptHub : Screen
+    data object ViewerSettings : Screen
     data object EditGlobalPrompt : Screen
     data object EditGlobalGlossary : Screen
     data class WorkSettings(val workKey: String) : Screen
@@ -160,6 +204,8 @@ private fun AppRoot(
     browser: BrowserController,
     reader: ReaderController,
     browserNotice: MutableState<String?>,
+    registerPageKeys: (((forward: Boolean) -> Unit)?) -> Unit,
+    setDarkSystemBars: (Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val settings = app.settings
@@ -180,6 +226,9 @@ private fun AppRoot(
     val modelId by remember(providerId) { settings.aiModelId(providerId) }.collectAsState(initial = "")
     val effort by settings.aiEffort.collectAsState(initial = "")
     val cacheTtl by settings.aiCacheTtl.collectAsState(initial = SettingsStore.DEFAULT_CACHE_TTL)
+
+    val viewerSettings by settings.viewerSettings.collectAsState(initial = ViewerSettingsData())
+    val saveViewerSettings: (ViewerSettingsData) -> Unit = { value -> scope.launch { settings.setViewerSettings(value) } }
 
     // 프롬프트와 용어집
     val globalPrompt by settings.globalPrompt.collectAsState(initial = "")
@@ -296,6 +345,8 @@ private fun AppRoot(
             onOpenSiteRules = { stack.add(Screen.SiteRules) },
             onOpenAiSettings = { stack.add(Screen.AiSettings) },
             onOpenPrompts = { stack.add(Screen.PromptHub) },
+            viewerSummary = viewerSummary(viewerSettings),
+            onOpenViewerSettings = { stack.add(Screen.ViewerSettings) },
         )
 
         val top = stack.lastOrNull()
@@ -305,6 +356,10 @@ private fun AppRoot(
                 when (top) {
                     Screen.Viewer -> ViewerScreen(
                         state = reader.state,
+                        settings = viewerSettings,
+                        onSettingsChange = saveViewerSettings,
+                        registerPageKeys = registerPageKeys,
+                        setDarkSystemBars = setDarkSystemBars,
                         onBack = {
                             reader.close()
                             pop()
@@ -395,6 +450,8 @@ private fun AppRoot(
                         },
                         onDelete = { id -> scope.launch { app.apiKeys.remove(id) } },
                     )
+
+                    Screen.ViewerSettings -> ViewerSettingsScreen(viewerSettings, saveViewerSettings, onBack = ::pop)
 
                     Screen.PromptHub -> PromptHubScreen(
                         promptCustomized = globalPrompt.isNotBlank(),
@@ -505,6 +562,16 @@ private fun AppRoot(
     }
 }
 
+private fun viewerSummary(v: ViewerSettingsData): String {
+    val theme = when (v.theme) {
+        ViewerSettingsData.THEME_DARK -> "어둡게"
+        ViewerSettingsData.THEME_SEPIA -> "세피아"
+        else -> "밝게"
+    }
+    return "글자 ${v.fontSize} · 줄 간격 ${v.lineSpacing / 10}.${v.lineSpacing % 10}배 · $theme" +
+        if (v.volumeKeyPaging) " · 볼륨 키 넘김" else ""
+}
+
 /** 모델 목록을 처음 불러왔을 때 골라 둘 기본 모델 */
 private const val DEFAULT_MODEL_ID = "claude-opus-5-5"
 
@@ -526,6 +593,8 @@ private fun MainTabs(
     onOpenSiteRules: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenPrompts: () -> Unit,
+    viewerSummary: String,
+    onOpenViewerSettings: () -> Unit,
 ) {
     Scaffold(
         containerColor = AppColors.Background,
@@ -576,7 +645,15 @@ private fun MainTabs(
                 Tab.Translate -> Unit
                 Tab.Library -> LibraryPlaceholder(cover)
                 Tab.Settings -> SettingsScreen(
-                    siteRuleCount, aiSummary, promptSummary, onOpenSiteRules, onOpenAiSettings, onOpenPrompts, cover,
+                    siteRuleCount = siteRuleCount,
+                    aiSummary = aiSummary,
+                    promptSummary = promptSummary,
+                    viewerSummary = viewerSummary,
+                    onOpenSiteRules = onOpenSiteRules,
+                    onOpenAiSettings = onOpenAiSettings,
+                    onOpenPrompts = onOpenPrompts,
+                    onOpenViewerSettings = onOpenViewerSettings,
+                    modifier = cover,
                 )
             }
         }
