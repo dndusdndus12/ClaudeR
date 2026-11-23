@@ -4,6 +4,7 @@ import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
@@ -64,12 +66,18 @@ const val EXAMPLE_URL = "https://www.69shuba.com/txt/21160/12097699"
 @Composable
 fun BrowserScreen(
     browser: BrowserController,
+    /** 이 화면이 맨 위에 보이는 상태인지. 다른 화면에 가려져 있을 때는 뒤로 가기를 가로채지 않는다. */
+    active: Boolean,
     workLabel: String,
     extracting: Boolean,
-    onExtract: () -> Unit,
+    /** 번역이나 다음 화 이동이 실패했을 때 보여 줄 안내 */
+    notice: String?,
+    onDismissNotice: () -> Unit,
+    onTranslate: () -> Unit,
+    onPreview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    BackHandler(enabled = browser.canGoBack) { browser.goBack() }
+    BackHandler(enabled = active && browser.canGoBack) { browser.goBack() }
 
     Column(modifier.fillMaxSize().background(AppColors.Background)) {
         AddressBar(browser)
@@ -96,8 +104,22 @@ fun BrowserScreen(
             if (!browser.hasPage) StartHint(onOpenExample = { browser.load(EXAMPLE_URL) })
         }
 
+        if (notice != null) NoticeBar(notice, onDismissNotice)
         HorizontalDivider(color = AppColors.Outline)
-        ActionBar(browser, workLabel, extracting, onExtract)
+        ActionBar(browser, workLabel, extracting, onTranslate, onPreview)
+    }
+}
+
+@Composable
+private fun NoticeBar(text: String, onDismiss: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().background(Color(0xFFFFF4D6)).padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, fontSize = 14.sp, color = AppColors.TextPrimary, modifier = Modifier.weight(1f))
+        IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+            Icon(painterResource(R.drawable.ic_close), contentDescription = "닫기", modifier = Modifier.size(18.dp))
+        }
     }
 }
 
@@ -182,8 +204,10 @@ private fun ActionBar(
     browser: BrowserController,
     workLabel: String,
     extracting: Boolean,
-    onExtract: () -> Unit,
+    onTranslate: () -> Unit,
+    onPreview: () -> Unit,
 ) {
+    var menuOpen by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -197,17 +221,48 @@ private fun ActionBar(
         IconButton(onClick = browser::goForward, enabled = browser.canGoForward, modifier = Modifier.size(40.dp)) {
             Icon(painterResource(R.drawable.ic_chevron_right), contentDescription = "앞으로")
         }
-        Button(
-            onClick = onExtract,
-            enabled = browser.hasPage && !extracting,
-            modifier = Modifier.padding(horizontal = 4.dp).height(44.dp),
-            shape = RoundedCornerShape(22.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = AppColors.Blue),
+        // 번역 버튼과, 그 옆의 화살표(추출 결과만 확인하는 메뉴)
+        Row(
+            Modifier
+                .padding(horizontal = 4.dp)
+                .height(44.dp)
+                .background(if (browser.hasPage && !extracting) AppColors.Blue else AppColors.Outline, RoundedCornerShape(22.dp)),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (extracting) {
-                CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
-            } else {
-                Text("추출 미리보기", fontWeight = FontWeight.SemiBold)
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp))
+                    .clickable(enabled = browser.hasPage && !extracting, onClick = onTranslate)
+                    .height(44.dp)
+                    .padding(start = 28.dp, end = 20.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (extracting) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Text("번역", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+                }
+            }
+            Box(Modifier.size(width = 1.dp, height = 44.dp).background(Color.White.copy(alpha = 0.35f)))
+            Box {
+                Box(
+                    Modifier
+                        .clip(RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp))
+                        .clickable(enabled = browser.hasPage && !extracting) { menuOpen = true }
+                        .size(width = 44.dp, height = 44.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(painterResource(R.drawable.ic_expand_more), contentDescription = "더 보기", tint = Color.White)
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("추출 미리보기") },
+                        onClick = {
+                            menuOpen = false
+                            onPreview()
+                        },
+                    )
+                }
             }
         }
         // 작품명(추출 전에는 페이지 제목)
@@ -250,7 +305,7 @@ private fun StartHint(onOpenExample: () -> Unit) {
         Text("소설 사이트를 열어 보세요", fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
             "위 주소창에 주소를 입력하거나 붙여넣으면 일반 브라우저처럼 열립니다. " +
-                "읽을 회차 페이지에서 아래의 파란 버튼을 누르면 본문을 추출합니다.",
+                "읽을 회차 페이지에서 아래의 번역 버튼을 누르면 번역을 시작합니다.",
             color = AppColors.TextSecondary,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 12.dp, bottom = 20.dp),

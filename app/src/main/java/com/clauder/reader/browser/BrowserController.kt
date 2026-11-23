@@ -3,6 +3,7 @@ package com.clauder.reader.browser
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -18,8 +19,16 @@ import com.clauder.reader.BuildConfig
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.extract.ChapterCleaner
 import com.clauder.reader.extract.ExtractedChapter
+import com.clauder.reader.extract.ExtractionStatus
 import com.clauder.reader.extract.RawExtraction
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlin.coroutines.resume
 
@@ -53,6 +62,9 @@ class BrowserController(
     private val extractorSource: String by lazy {
         context.assets.open("extractor.js").bufferedReader().use { it.readText() }
     }
+
+    /** 페이지 로드가 끝날 때마다 그 주소를 알린다(다음 화 이동을 기다릴 때 사용). */
+    private val pageFinished = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
     val webView: WebView = WebView(context).apply {
         layoutParams = ViewGroup.LayoutParams(
@@ -90,6 +102,7 @@ class BrowserController(
                 this@BrowserController.title = view.title.orEmpty()
                 syncNav(view)
                 CookieManager.getInstance().flush()
+                pageFinished.tryEmit(pageUrl)
                 onPageLoaded(pageUrl)
             }
 
@@ -113,6 +126,8 @@ class BrowserController(
         canGoBack = view.canGoBack()
         canGoForward = view.canGoForward()
     }
+
+    val currentHost: String get() = Uri.parse(url).host.orEmpty()
 
     /** 주소창 입력을 열기. 주소가 아니면 검색한다. */
     fun load(input: String) {
@@ -144,6 +159,45 @@ class BrowserController(
         }
     }
 
+    /**
+     * 다음(또는 이전) 화로 이동하고, 페이지가 뜨면 본문을 추출해 돌려준다.
+     * 보안 확인 페이지가 잠깐 떴다가 자동으로 넘어가는 경우를 위해 몇 초간 다시 시도한다.
+     * 끝내 실패하면 상태가 OK 가 아닌 결과를 돌려주며, 이때는 사용자가 브라우저 화면에서 직접 해결해야 한다.
+     */
+    suspend fun navigateAndExtract(
+        from: ExtractedChapter,
+        next: Boolean,
+        ruleFor: (host: String) -> SiteRule?,
+    ): ExtractedChapter {
+        val oldUrl = stripHash(from.url)
+        val hasAddress = (if (next) from.nextUrl else from.prevUrl) != null
+        coroutineScope {
+            // 이동을 시작하기 전에 먼저 기다리기 시작해야 로드 완료 신호를 놓치지 않는다.
+            val arrived = async(start = CoroutineStart.UNDISPATCHED) {
+                withTimeoutOrNull(if (hasAddress) 30_000L else 8_000L) {
+                    pageFinished.first { stripHash(it) != oldUrl }
+                }
+            }
+            navigate(from, next)
+            arrived.await()
+        }
+
+        var last = ExtractedChapter.error(url, "다음 화 페이지를 불러오지 못했습니다.")
+        repeat(EXTRACT_ATTEMPTS) { attempt ->
+            delay(if (attempt == 0) 700L else 1500L)
+            val chapter = extract(ruleFor(currentHost))
+            val moved = stripHash(chapter.url) != oldUrl ||
+                chapter.paragraphs.firstOrNull() != from.paragraphs.firstOrNull()
+            if (chapter.status == ExtractionStatus.OK && moved) return chapter
+            last = if (chapter.status == ExtractionStatus.OK) {
+                ExtractedChapter.error(chapter.url, "다음 화로 이동하지 못했습니다.")
+            } else {
+                chapter
+            }
+        }
+        return last
+    }
+
     /** 지금 보이는 페이지에서 본문을 추출한다. 반드시 메인 스레드에서 호출. */
     suspend fun extract(rule: SiteRule?): ExtractedChapter {
         val pageUrl = url
@@ -173,7 +227,7 @@ class BrowserController(
         )
         if (BuildConfig.DEBUG) {
             // 개발용: 추출한 본문 전체를 로그로 남겨 PC에서 검증할 수 있게 한다.
-            chapter.paragraphs.forEachIndexed { i, p -> Log.d(TAG_TEXT, "$i	$p") }
+            chapter.paragraphs.forEachIndexed { i, p -> Log.d(TAG_TEXT, "$i\t$p") }
         }
         return chapter
     }
@@ -193,5 +247,8 @@ class BrowserController(
     companion object {
         const val TAG = "Clauder"
         const val TAG_TEXT = "ClauderText"
+        private const val EXTRACT_ATTEMPTS = 6
+
+        fun stripHash(u: String): String = u.substringBefore('#')
     }
 }

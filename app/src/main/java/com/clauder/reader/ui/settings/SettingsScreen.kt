@@ -28,7 +28,13 @@ import com.clauder.reader.ui.theme.AppColors
 
 /** 설정 탭 첫 화면. 아직 만들지 않은 항목은 "준비 중"으로 표시한다. */
 @Composable
-fun SettingsScreen(siteRuleCount: Int, onOpenSiteRules: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    siteRuleCount: Int,
+    aiSummary: String,
+    onOpenSiteRules: () -> Unit,
+    onOpenAiSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier
             .fillMaxSize()
@@ -50,7 +56,7 @@ fun SettingsScreen(siteRuleCount: Int, onOpenSiteRules: () -> Unit, modifier: Mo
 
         SectionTitle("번역")
         OutlineCard {
-            SettingsRow("AI 설정", "준비 중 (M2)", null)
+            SettingsRow("AI 설정", aiSummary, onOpenAiSettings)
             HorizontalDivider(color = AppColors.Outline)
             SettingsRow("프롬프트와 용어집", "준비 중 (M3)", null)
         }
