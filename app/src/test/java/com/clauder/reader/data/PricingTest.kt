@@ -101,6 +101,7 @@ class PricingTest {
         aiModels = mapOf("claude" to "claude-sonnet-5"),
         aiEffort = "low",
         aiCacheTtl = "1h",
+        prefetchNext = true,
         modelPrices = mapOf("claude-sonnet-5" to sonnet5),
         works = listOf(WorkBackup(workKey = "example.com/book/1", title = "作品", promptMode = "custom", customPrompt = "전용", glossary = "丙=병")),
     )
@@ -149,6 +150,8 @@ class PricingTest {
         }
         val withExtra = BackupCodec.decode("""{"app":"Clauder","formatVersion":1,"futureField":123,"globalPrompt":"p"}""")
         assertEquals("p", withExtra.globalPrompt)
+        // 미리 번역 항목이 없던 예전 파일은 "꺼짐"으로 읽는다.
+        assertFalse(withExtra.prefetchNext)
     }
 
     @Test

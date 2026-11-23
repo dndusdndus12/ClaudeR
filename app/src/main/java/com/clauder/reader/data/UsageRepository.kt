@@ -66,6 +66,7 @@ object BackupManager {
                 .filterValues { it.isNotBlank() },
             aiEffort = settings.aiEffort.first(),
             aiCacheTtl = settings.aiCacheTtl.first(),
+            prefetchNext = settings.prefetchNext.first(),
             modelPrices = settings.modelPrices.first(),
             works = app.works.exportSettings(),
         )
@@ -82,6 +83,7 @@ object BackupManager {
         backup.aiModels.forEach { (provider, model) -> settings.setAiModelId(provider, model) }
         settings.setAiEffort(backup.aiEffort)
         if (backup.aiCacheTtl.isNotBlank()) settings.setAiCacheTtl(backup.aiCacheTtl)
+        settings.setPrefetchNext(backup.prefetchNext)
         settings.setModelPrices(backup.modelPrices)
         app.works.importSettings(backup.works)
     }

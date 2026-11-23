@@ -435,8 +435,9 @@ fun ViewerScreen(
             Column(Modifier.fillMaxWidth().background(palette.bar).pointerInput(Unit) {}) {
                 HorizontalDivider(color = palette.divider)
                 // 페이지 모드에는 글 끝에 토큰 수를 적을 자리가 없으므로 막대에 보여 준다.
-                if (settings.pagedMode && state.phase == ReaderPhase.DONE) {
-                    usageSummary(state)?.let { summary ->
+                // 미리 번역의 진행 상황은 어느 모드에서나 막대에 보여 준다.
+                if (state.phase == ReaderPhase.DONE) {
+                    (if (settings.pagedMode) footerText(state) else state.nextNote)?.let { summary ->
                         Text(
                             summary,
                             fontSize = 12.sp,
@@ -554,7 +555,7 @@ private fun Progress(label: String, palette: ViewerPalette) {
 
 @Composable
 private fun UsageLine(state: ReaderState, palette: ViewerPalette) {
-    val summary = usageSummary(state) ?: return
+    val summary = footerText(state) ?: return
     Text(
         summary,
         fontSize = 12.sp,
@@ -563,6 +564,10 @@ private fun UsageLine(state: ReaderState, palette: ViewerPalette) {
         modifier = Modifier.padding(top = 12.dp),
     )
 }
+
+/** 토큰 요약과 미리 번역 안내를 합친 글. 둘 다 없으면 null. */
+private fun footerText(state: ReaderState): String? =
+    listOfNotNull(usageSummary(state), state.nextNote).joinToString("\n").ifBlank { null }
 
 /** 토큰 수, 모델, 용어집 적용 수를 두 줄로 요약한다. 토큰 기록이 없으면 null. */
 private fun usageSummary(state: ReaderState): String? {

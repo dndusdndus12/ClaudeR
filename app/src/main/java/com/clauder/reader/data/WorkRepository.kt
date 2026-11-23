@@ -50,6 +50,25 @@ class WorkRepository(private val works: WorkDao, private val chapters: ChapterDa
         return work
     }
 
+    /**
+     * 회차가 속한 작품을 돌려준다(없으면 등록한다). [touch] 와 달리 "마지막으로 진입한 회차"는 바꾸지 않는다.
+     * 미리 번역처럼 사용자가 아직 들어가지 않은 회차를 다룰 때 쓴다.
+     */
+    suspend fun ensure(chapter: ExtractedChapter): WorkEntity {
+        val key = WorkKey.of(chapter.url, chapter.workTitle)
+        works.get(key)?.let { return it }
+        val now = System.currentTimeMillis()
+        val work = WorkEntity(
+            workKey = key,
+            host = WorkKey.hostOf(key),
+            title = chapter.workTitle.ifBlank { key },
+            createdAt = now,
+            updatedAt = now,
+        )
+        works.upsert(work)
+        return work
+    }
+
     suspend fun update(key: String, change: (WorkEntity) -> WorkEntity) {
         val current = works.get(key) ?: return
         works.upsert(change(current).copy(updatedAt = System.currentTimeMillis()))

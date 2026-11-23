@@ -64,6 +64,10 @@ class SettingsStore(private val context: Context) {
     val aiCacheTtl: Flow<String> = string(KEY_AI_CACHE_TTL).map { it.ifBlank { DEFAULT_CACHE_TTL } }
     suspend fun setAiCacheTtl(ttl: String) = setString(KEY_AI_CACHE_TTL, ttl)
 
+    /** 미리 번역: 회차를 열면 다음 1회차를 화면 뒤에서 미리 번역해 둔다. 기본은 꺼짐(요금이 더 나가므로). */
+    val prefetchNext: Flow<Boolean> = string(KEY_PREFETCH_NEXT).map { it == "1" }
+    suspend fun setPrefetchNext(on: Boolean) = setString(KEY_PREFETCH_NEXT, if (on) "1" else "0")
+
     // ---------- 프롬프트와 용어집(전역) ----------
 
     /** 사용자가 고친 전역 프롬프트. 비어 있으면 앱에 내장된 기본 프롬프트를 쓴다. */
@@ -100,6 +104,7 @@ class SettingsStore(private val context: Context) {
          */
         const val DEFAULT_CACHE_TTL = "1h"
         private const val KEY_AI_CACHE_TTL = "ai_cache_ttl"
+        private const val KEY_PREFETCH_NEXT = "prefetch_next"
         private const val KEY_VIEWER = "viewer_settings_json"
         private const val KEY_MODEL_PRICES = "model_prices_json"
         private const val KEY_GLOBAL_PROMPT = "global_prompt"

@@ -40,6 +40,8 @@ data class SettingsBackup(
     val aiModels: Map<String, String> = emptyMap(),
     val aiEffort: String = "",
     val aiCacheTtl: String = "",
+    /** 다음 화 미리 번역을 켰는지 */
+    val prefetchNext: Boolean = false,
     /** 사용자가 직접 입력한 모델별 단가 */
     val modelPrices: Map<String, ModelPrice> = emptyMap(),
     val works: List<WorkBackup> = emptyList(),

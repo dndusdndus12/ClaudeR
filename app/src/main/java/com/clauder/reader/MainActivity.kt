@@ -310,6 +310,7 @@ private fun AppRoot(
     val modelId by remember(providerId) { settings.aiModelId(providerId) }.collectAsState(initial = "")
     val effort by settings.aiEffort.collectAsState(initial = "")
     val cacheTtl by settings.aiCacheTtl.collectAsState(initial = SettingsStore.DEFAULT_CACHE_TTL)
+    val prefetchNext by settings.prefetchNext.collectAsState(initial = false)
 
     val viewerSettings by settings.viewerSettings.collectAsState(initial = ViewerSettingsData())
     val saveViewerSettings: (ViewerSettingsData) -> Unit = { value -> scope.launch { settings.setViewerSettings(value) } }
@@ -614,6 +615,7 @@ private fun AppRoot(
                         selectedModelId = modelId,
                         effort = effort,
                         cacheTtl = cacheTtl,
+                        prefetchNext = prefetchNext,
                         loadingModels = loadingModels,
                         modelError = modelError,
                         onBack = ::pop,
@@ -622,6 +624,7 @@ private fun AppRoot(
                         onSelectModel = { model -> scope.launch { settings.setAiModelId(providerId, model.id) } },
                         onSelectEffort = { value -> scope.launch { settings.setAiEffort(value) } },
                         onSelectCacheTtl = { value -> scope.launch { settings.setAiCacheTtl(value) } },
+                        onSetPrefetchNext = { value -> scope.launch { settings.setPrefetchNext(value) } },
                     )
 
                     is Screen.AiKeys -> AiKeysScreen(

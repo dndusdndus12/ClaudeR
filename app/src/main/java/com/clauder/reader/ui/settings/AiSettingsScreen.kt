@@ -25,6 +25,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +65,7 @@ fun AiSettingsScreen(
     selectedModelId: String,
     effort: String,
     cacheTtl: String,
+    prefetchNext: Boolean,
     loadingModels: Boolean,
     modelError: String?,
     onBack: () -> Unit,
@@ -71,6 +74,7 @@ fun AiSettingsScreen(
     onSelectModel: (ModelInfo) -> Unit,
     onSelectEffort: (String) -> Unit,
     onSelectCacheTtl: (String) -> Unit,
+    onSetPrefetchNext: (Boolean) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AppColors.Background).navigationBarsPadding()) {
         BackTopBar("AI 설정", onBack)
@@ -176,6 +180,27 @@ fun AiSettingsScreen(
                             "기억시키는 첫 요청은 조금 더 비싸고(1시간은 2배, 5분은 1.25배), 그 뒤로는 훨씬 싸게 읽습니다. " +
                             "회차 하나를 읽는 데 5분 넘게 걸린다면 1시간이 유리합니다. " +
                             "프롬프트가 너무 짧으면(모델에 따라 약 500~4,000토큰 미만) 캐시되지 않습니다.",
+                        color = AppColors.TextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
+            SectionTitle("미리 번역")
+            OutlineCard {
+                Column(Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("다음 화 미리 번역", fontSize = 16.sp, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = prefetchNext,
+                            onCheckedChange = onSetPrefetchNext,
+                            colors = SwitchDefaults.colors(checkedTrackColor = AppColors.Blue),
+                        )
+                    }
+                    Text(
+                        "켜 두면 회차를 읽는 동안 다음 1회차를 미리 번역해 저장합니다. \"다음 화\"를 눌렀을 때 기다리지 않고 바로 읽을 수 있습니다. " +
+                            "미리 번역한 회차도 똑같이 요금이 나가며, 읽지 않고 그만두면 그 회차의 요금은 그대로 쓴 것이 됩니다. " +
+                            "첫 번역은 지금처럼 직접 번역 버튼을 눌러야 시작하고, 뷰어를 닫으면 미리 번역도 멈춥니다.",
                         color = AppColors.TextSecondary,
                         fontSize = 13.sp,
                         modifier = Modifier.padding(top = 12.dp),
