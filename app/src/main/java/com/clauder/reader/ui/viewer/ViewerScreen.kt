@@ -51,6 +51,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -70,6 +71,8 @@ import com.clauder.reader.translate.PromptBuilder
 import com.clauder.reader.translate.ReaderPhase
 import com.clauder.reader.translate.ReaderState
 import com.clauder.reader.ui.theme.AppColors
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 
@@ -114,6 +117,8 @@ fun ViewerScreen(
     onOpenWorkSettings: () -> Unit,
     registerPageInput: (PageInput?) -> Unit,
     setDarkSystemBars: (Boolean) -> Unit,
+    /** 읽던 위치가 바뀌면 알린다(회차 주소, 화면 맨 위 항목 번호, 그 안에서의 어긋남). */
+    onPosition: (url: String, index: Int, offset: Int) -> Unit,
 ) {
     val chapter = state.chapter
     val palette = ViewerPalette.of(settings.theme)
@@ -128,8 +133,27 @@ fun ViewerScreen(
     // 오류가 났을 때는 조치할 수 있도록 막대를 항상 보여 준다.
     val barsVisible = barsWanted || state.phase == ReaderPhase.ERROR
 
-    // 다른 회차로 바뀌면 맨 위에서부터 읽도록 한다.
-    LaunchedEffect(chapter?.url) { listState.scrollToItem(0) }
+    // 회차를 열 때: 새로 번역하는 회차는 맨 위에서, 저장된 회차는 읽던 위치에서 시작한다.
+    LaunchedEffect(state.openCount) { listState.scrollToItem(state.scrollIndex, state.scrollOffset) }
+
+    // 읽던 위치 저장: 스크롤이 잠시 멈추면 저장하고, 화면을 떠날 때도 한 번 더 저장한다.
+    val latestPosition by rememberUpdatedState(onPosition)
+    val doneUrl = if (state.phase == ReaderPhase.DONE) chapter?.url else null
+    LaunchedEffect(state.openCount, doneUrl) {
+        val url = doneUrl ?: return@LaunchedEffect
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .collectLatest { (index, offset) ->
+                delay(600)
+                latestPosition(url, index, offset)
+            }
+    }
+    DisposableEffect(doneUrl) {
+        onDispose {
+            if (doneUrl != null) {
+                latestPosition(doneUrl, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            }
+        }
+    }
 
     DisposableEffect(palette.dark) {
         setDarkSystemBars(palette.dark)
@@ -329,7 +353,7 @@ private fun StatusFooter(
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp)) {
         when (state.phase) {
-            ReaderPhase.LOADING_PAGE -> Progress("다음 화를 불러오는 중…", palette)
+            ReaderPhase.LOADING_PAGE -> Progress("회차를 불러오는 중…", palette)
             ReaderPhase.REQUESTING -> Progress(
                 (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state),
                 palette,

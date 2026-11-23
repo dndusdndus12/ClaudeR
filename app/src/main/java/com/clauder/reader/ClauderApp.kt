@@ -17,7 +17,7 @@ class ClauderApp : Application() {
     val settings: SettingsStore by lazy { SettingsStore(this) }
     val apiKeys: ApiKeyStore by lazy { ApiKeyStore(settings, SecretCrypto()) }
     private val database: AppDatabase by lazy { AppDatabase.create(this) }
-    val works: WorkRepository by lazy { WorkRepository(database.workDao()) }
+    val works: WorkRepository by lazy { WorkRepository(database.workDao(), database.chapterDao()) }
 
     /** 키 순환 상태(어떤 키가 쉬는 중인지). 앱이 켜져 있는 동안 유지된다. */
     val keyRotator = KeyRotator()

@@ -15,6 +15,8 @@ import com.clauder.reader.ai.TranslationRequest
 import com.clauder.reader.browser.BrowserController
 import com.clauder.reader.data.ApiKeyEntry
 import com.clauder.reader.data.SiteRule
+import com.clauder.reader.data.WorkRepository
+import com.clauder.reader.data.db.ChapterEntity
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
 import kotlinx.coroutines.CancellationException
@@ -59,8 +61,13 @@ data class ReaderState(
     val glossaryTerms: Int = 0,
     val usage: TokenUsage? = null,
     val modelName: String = "",
-    /** 이미 번역해 둔 것을 다시 보여 준 것인지(API 를 다시 부르지 않음) */
+    /** 기기에 저장해 둔 번역을 다시 보여 준 것인지(API 를 다시 부르지 않음) */
     val fromCache: Boolean = false,
+    /** 저장된 회차를 열 때 돌아갈 읽던 위치 */
+    val scrollIndex: Int = 0,
+    val scrollOffset: Int = 0,
+    /** 회차를 열 때마다 1씩 늘어난다. 같은 회차를 다시 열어도 뷰어가 위치를 새로 맞추게 하기 위함. */
+    val openCount: Int = 0,
 ) {
     val busy: Boolean
         get() = phase == ReaderPhase.LOADING_PAGE || phase == ReaderPhase.REQUESTING ||
@@ -69,6 +76,7 @@ data class ReaderState(
 
 /**
  * 번역 흐름을 제어한다: 추출된 회차를 번역하고, 다음/이전 화로 넘어가 다시 번역한다.
+ * 번역한 회차는 기기에 저장해 두고, 다시 열 때는 저장된 것을 보여 준다.
  * 화면(뷰어)은 [state] 를 보여 주기만 한다.
  */
 class ReaderController(
@@ -82,33 +90,72 @@ class ReaderController(
         private set
 
     private var job: Job? = null
+    private var opens = 0
 
-    private data class Cached(val text: String, val usage: TokenUsage?, val modelName: String, val glossaryTerms: Int)
-
-    /** 이번 실행 동안 번역한 회차(주소 → 번역문). 기기 저장은 서재 기능(M4)에서 추가한다. */
-    private val cache = object : LinkedHashMap<String, Cached>(16, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?) = size > 30
-    }
-
-    /** 추출이 끝난 회차의 번역을 시작한다. 이미 번역한 회차면 저장된 것을 보여 준다. */
+    /**
+     * 브라우저에서 추출한 회차를 연다. 저장해 둔 번역이 있으면 그것을 보여 주고, 없으면 번역을 시작한다.
+     * @param forceRetranslate 저장된 번역이 있어도 새로 번역한다("다시 번역").
+     */
     fun open(chapter: ExtractedChapter, forceRetranslate: Boolean = false) {
         job?.cancel()
-        val key = BrowserController.stripHash(chapter.url)
-        val workKey = WorkKey.of(chapter.url, chapter.workTitle)
-        val cached = if (forceRetranslate) null else cache[key]
-        if (cached != null) {
-            state = ReaderState(
-                chapter = chapter, workKey = workKey, phase = ReaderPhase.DONE, text = cached.text,
-                usage = cached.usage, modelName = cached.modelName, glossaryTerms = cached.glossaryTerms, fromCache = true,
-            )
-            return
+        val url = BrowserController.stripHash(chapter.url)
+        state = ReaderState(
+            chapter = chapter,
+            workKey = WorkKey.of(chapter.url, chapter.workTitle),
+            phase = ReaderPhase.REQUESTING,
+            openCount = ++opens,
+        )
+        job = scope.launch {
+            val saved = if (forceRetranslate) null else app.works.chapter(url)
+            if (saved != null) showSaved(saved, live = chapter) else translate(chapter, url)
         }
-        state = ReaderState(chapter = chapter, workKey = workKey, phase = ReaderPhase.REQUESTING)
-        job = scope.launch { translate(chapter, key) }
+    }
+
+    /**
+     * 서재에서 저장된 회차를 바로 연다(브라우저와 API 를 쓰지 않는다).
+     * @param onMissing 저장된 번역이 없을 때 호출된다.
+     */
+    fun openSaved(url: String, onMissing: () -> Unit) {
+        job?.cancel()
+        // 앞서 보던 회차가 잠깐 비치지 않도록 화면을 먼저 비운다.
+        state = ReaderState(phase = ReaderPhase.LOADING_PAGE, openCount = ++opens)
+        job = scope.launch {
+            val saved = app.works.chapter(BrowserController.stripHash(url))
+            if (saved == null) onMissing() else showSaved(saved, live = null)
+        }
+    }
+
+    /** 저장된 번역을 화면에 올린다. [live] 는 방금 브라우저에서 추출한 같은 회차(있으면 그쪽의 이동 정보가 더 정확하다). */
+    private suspend fun showSaved(saved: ChapterEntity, live: ExtractedChapter?) {
+        val work = app.works.get(saved.workKey)
+        val chapter = live ?: WorkRepository.toExtracted(saved, work?.title.orEmpty())
+        state = ReaderState(
+            chapter = chapter,
+            workKey = saved.workKey,
+            phase = ReaderPhase.DONE,
+            text = saved.translation,
+            usage = TokenUsage(saved.inputTokens, saved.outputTokens, saved.cacheWriteTokens, saved.cacheReadTokens),
+            modelName = saved.modelName,
+            glossaryTerms = saved.glossaryTerms,
+            chunkCount = saved.chunkCount,
+            fromCache = true,
+            scrollIndex = saved.scrollIndex,
+            scrollOffset = saved.scrollOffset,
+            openCount = ++opens,
+        )
+        // 이어보기가 이 회차를 가리키도록 한다.
+        app.works.touch(chapter)
     }
 
     fun retranslate() {
         state.chapter?.let { open(it, forceRetranslate = true) }
+    }
+
+    /** 읽던 위치를 저장한다(번역이 끝난 회차만). */
+    fun savePosition(url: String, index: Int, offset: Int) {
+        val current = state
+        if (current.phase != ReaderPhase.DONE || current.chapter?.url != url) return
+        scope.launch { app.works.savePosition(BrowserController.stripHash(url), index, offset) }
     }
 
     /** 뷰어를 닫을 때: 진행 중인 요청을 취소한다. */
@@ -124,8 +171,24 @@ class ReaderController(
         val current = state.chapter ?: return
         if (if (next) !current.hasNext else !current.hasPrev) return
         job?.cancel()
-        state = ReaderState(chapter = current, workKey = state.workKey, phase = ReaderPhase.LOADING_PAGE)
+        val target = if (next) current.nextUrl else current.prevUrl
         job = scope.launch {
+            // 이미 번역해 둔 회차면 브라우저를 거치지 않고 바로 보여 준다.
+            val saved = target?.let { app.works.chapter(BrowserController.stripHash(it)) }
+            if (saved != null) {
+                showSaved(saved, live = null)
+                return@launch
+            }
+            // 주소 없이 버튼으로만 이동하는 사이트인데 브라우저가 다른 페이지에 있으면, 그 회차 페이지부터 열어야 한다.
+            val browserIsHere = BrowserController.stripHash(browser.url) == BrowserController.stripHash(current.url)
+            if (target == null && !browserIsHere) {
+                browser.load(current.url)
+                onNeedBrowser("이 사이트는 다음 화 주소를 알 수 없어 브라우저에서 이동해야 합니다. 페이지가 열리면 다음 화로 이동한 뒤 번역 버튼을 눌러 주세요.")
+                return@launch
+            }
+            state = ReaderState(
+                chapter = current, workKey = state.workKey, phase = ReaderPhase.LOADING_PAGE, openCount = state.openCount,
+            )
             val rules = app.settings.siteRules.first()
             val chapter = browser.navigateAndExtract(current, next) { host -> SiteRule.match(rules, host) }
             if (chapter.status == ExtractionStatus.OK) {
@@ -138,7 +201,7 @@ class ReaderController(
         }
     }
 
-    private suspend fun translate(chapter: ExtractedChapter, cacheKey: String) {
+    private suspend fun translate(chapter: ExtractedChapter, url: String) {
         val settings = app.settings
         val providerId = settings.aiProvider.first().ifBlank { app.providers.first().id }
         val provider = app.provider(providerId)
@@ -193,7 +256,31 @@ class ReaderController(
             val text = done.toString().trimEnd()
             Log.i(TAG, "translate done chunks=${chunks.size} terms=${sentTerms.size} usage=$usage chars=${text.length}")
             state = state.copy(phase = ReaderPhase.DONE, text = text, usage = usage, retrying = false)
-            cache[cacheKey] = Cached(text, usage, model.label, sentTerms.size)
+
+            // 다시 열 때 API 를 부르지 않도록 기기에 저장한다.
+            val now = System.currentTimeMillis()
+            app.works.saveChapter(
+                ChapterEntity(
+                    url = url,
+                    workKey = work.workKey,
+                    title = chapter.chapterTitle,
+                    translatedTitle = PromptBuilder.parseTranslation(text).title,
+                    translation = text,
+                    sourceJson = WorkRepository.encodeParagraphs(chapter.paragraphs),
+                    nextUrl = chapter.nextUrl,
+                    prevUrl = chapter.prevUrl,
+                    modelName = model.label,
+                    inputTokens = usage.inputTokens,
+                    outputTokens = usage.outputTokens,
+                    cacheWriteTokens = usage.cacheWriteTokens,
+                    cacheReadTokens = usage.cacheReadTokens,
+                    glossaryTerms = sentTerms.size,
+                    chunkCount = chunks.size,
+                    createdAt = now,
+                    translatedAt = now,
+                    readAt = now,
+                ),
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

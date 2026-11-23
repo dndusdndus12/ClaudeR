@@ -62,6 +62,8 @@ import com.clauder.reader.extract.ExtractionStatus
 import com.clauder.reader.translate.Glossary
 import com.clauder.reader.translate.ReaderController
 import com.clauder.reader.ui.common.BackTopBar
+import com.clauder.reader.ui.library.ChapterListScreen
+import com.clauder.reader.ui.library.LibraryScreen
 import com.clauder.reader.ui.preview.ExtractionPreviewScreen
 import com.clauder.reader.ui.settings.AiKeysScreen
 import com.clauder.reader.ui.settings.AiSettingsScreen
@@ -234,6 +236,7 @@ private sealed interface Screen {
     data class AiKeys(val providerId: String) : Screen
     data object PromptHub : Screen
     data object ViewerSettings : Screen
+    data class ChapterList(val workKey: String) : Screen
     data object EditGlobalPrompt : Screen
     data object EditGlobalGlossary : Screen
     data class WorkSettings(val workKey: String) : Screen
@@ -277,6 +280,18 @@ private fun AppRoot(
     val globalPrompt by settings.globalPrompt.collectAsState(initial = "")
     val globalGlossary by settings.globalGlossary.collectAsState(initial = "")
     val works by app.works.all.collectAsState(initial = emptyList())
+    val chapterCountList by app.works.chapterCounts.collectAsState(initial = emptyList())
+    val chapterCounts = remember(chapterCountList) { chapterCountList.associate { it.workKey to it.count } }
+
+    /** 저장된 회차를 뷰어로 연다. 저장된 번역이 없으면 그 페이지를 브라우저에 열고 번역하도록 안내한다. */
+    fun openSavedChapter(url: String) {
+        if (url.isBlank()) return
+        reader.openSaved(url) {
+            browser.load(url)
+            browserNotice.value = "이 회차는 저장된 번역이 없습니다. 페이지가 열리면 번역 버튼을 눌러 주세요."
+        }
+        stack.add(Screen.Viewer)
+    }
     val globalGlossarySummary = remember(globalGlossary) {
         if (globalGlossary.isBlank()) "항목 없음" else Glossary.parse(globalGlossary).summary()
     }
@@ -390,6 +405,18 @@ private fun AppRoot(
             onOpenPrompts = { stack.add(Screen.PromptHub) },
             viewerSummary = viewerSummary(viewerSettings),
             onOpenViewerSettings = { stack.add(Screen.ViewerSettings) },
+            works = works,
+            chapterCounts = chapterCounts,
+            onResumeWork = { work -> openSavedChapter(work.lastChapterUrl) },
+            onOpenWorkChapters = { work -> stack.add(Screen.ChapterList(work.workKey)) },
+            onOpenWorkSettings = { work -> stack.add(Screen.WorkSettings(work.workKey)) },
+            onOpenWorkInBrowser = { work ->
+                if (work.lastChapterUrl.isNotBlank()) {
+                    browser.load(work.lastChapterUrl)
+                    tab = Tab.Translate
+                }
+            },
+            onDeleteWork = { work -> scope.launch { app.works.delete(work.workKey) } },
         )
 
         val top = stack.lastOrNull()
@@ -402,6 +429,7 @@ private fun AppRoot(
                         settings = viewerSettings,
                         onSettingsChange = saveViewerSettings,
                         registerPageInput = registerPageInput,
+                        onPosition = reader::savePosition,
                         setDarkSystemBars = setDarkSystemBars,
                         onBack = {
                             reader.close()
@@ -495,6 +523,16 @@ private fun AppRoot(
                     )
 
                     Screen.ViewerSettings -> ViewerSettingsScreen(viewerSettings, saveViewerSettings, onBack = ::pop)
+
+                    is Screen.ChapterList -> {
+                        val saved by remember(top.workKey) { app.works.chaptersOf(top.workKey) }.collectAsState(initial = emptyList())
+                        ChapterListScreen(
+                            work = works.firstOrNull { it.workKey == top.workKey },
+                            chapters = saved,
+                            onBack = ::pop,
+                            onOpen = ::openSavedChapter,
+                        )
+                    }
 
                     Screen.PromptHub -> PromptHubScreen(
                         promptCustomized = globalPrompt.isNotBlank(),
@@ -638,6 +676,13 @@ private fun MainTabs(
     onOpenPrompts: () -> Unit,
     viewerSummary: String,
     onOpenViewerSettings: () -> Unit,
+    works: List<WorkEntity>,
+    chapterCounts: Map<String, Int>,
+    onResumeWork: (WorkEntity) -> Unit,
+    onOpenWorkChapters: (WorkEntity) -> Unit,
+    onOpenWorkSettings: (WorkEntity) -> Unit,
+    onOpenWorkInBrowser: (WorkEntity) -> Unit,
+    onDeleteWork: (WorkEntity) -> Unit,
 ) {
     Scaffold(
         containerColor = AppColors.Background,
@@ -686,7 +731,16 @@ private fun MainTabs(
             val cover = content.background(AppColors.Background).pointerInput(Unit) {}
             when (tab) {
                 Tab.Translate -> Unit
-                Tab.Library -> LibraryPlaceholder(cover)
+                Tab.Library -> LibraryScreen(
+                    works = works,
+                    chapterCounts = chapterCounts,
+                    onResume = onResumeWork,
+                    onOpenChapters = onOpenWorkChapters,
+                    onOpenSettings = onOpenWorkSettings,
+                    onOpenInBrowser = onOpenWorkInBrowser,
+                    onDelete = onDeleteWork,
+                    modifier = cover,
+                )
                 Tab.Settings -> SettingsScreen(
                     siteRuleCount = siteRuleCount,
                     aiSummary = aiSummary,
@@ -703,12 +757,3 @@ private fun MainTabs(
     }
 }
 
-@Composable
-private fun LibraryPlaceholder(modifier: Modifier) {
-    Column(modifier.statusBarsPadding().padding(horizontal = 16.dp)) {
-        Text("서재", fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 16.dp))
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("번역해서 읽은 작품이 여기에 모입니다 (M4에서 구현)", color = AppColors.TextSecondary)
-        }
-    }
-}
