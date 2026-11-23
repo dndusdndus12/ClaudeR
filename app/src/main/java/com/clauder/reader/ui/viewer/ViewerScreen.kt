@@ -160,6 +160,7 @@ fun ViewerScreen(
                 coveredTop = (statusTop + if (latestBars) TopBarHeight else 0.dp).toPx(),
                 coveredBottom = (navBottom + if (latestBars) BottomBarHeight else 0.dp).toPx(),
                 lineHeight = latestSettings.lineHeight.sp.toPx(),
+                overlapLines = latestSettings.pageOverlapLines,
             )
         }
         scope.launch { listState.scrollBy(if (forward) distance else -distance) }

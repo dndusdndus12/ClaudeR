@@ -26,12 +26,15 @@ data class ViewerSettings(
     val remoteSwipePaging: Boolean = true,
     /** 리모컨의 넘김 방향을 반대로(다음 버튼이 이전으로 동작할 때 켠다) */
     val remoteSwipeReversed: Boolean = false,
+    /** 한 화면을 넘길 때 앞 화면과 겹쳐 보이게 남기는 줄 수 */
+    val pageOverlapLines: Int = 3,
 ) {
     /** 저장된 값이 범위를 벗어나 있어도 화면이 깨지지 않게 맞춘다. */
     fun sanitized() = copy(
         fontSize = fontSize.coerceIn(FONT_MIN, FONT_MAX),
         lineSpacing = lineSpacing.coerceIn(SPACING_MIN, SPACING_MAX),
         margin = margin.coerceIn(MARGIN_MIN, MARGIN_MAX),
+        pageOverlapLines = pageOverlapLines.coerceIn(OVERLAP_MIN, OVERLAP_MAX),
         theme = if (theme in THEMES) theme else THEME_LIGHT,
     )
 
@@ -50,6 +53,8 @@ data class ViewerSettings(
         const val SPACING_MAX = 26
         const val MARGIN_MIN = 4
         const val MARGIN_MAX = 48
+        const val OVERLAP_MIN = 0
+        const val OVERLAP_MAX = 10
     }
 }
 
@@ -89,11 +94,18 @@ object ViewerTaps {
     }
 
     /**
-     * 한 번에 넘길 거리(px). 화면에 보이는 높이에서 한 줄을 뺀 만큼 넘겨,
-     * 마지막 줄이 다음 화면의 첫 줄로 다시 보이게 한다(읽던 자리를 놓치지 않도록).
+     * 한 번에 넘길 거리(px). 화면에 보이는 높이에서 [overlapLines] 줄만큼을 뺀 거리를 넘겨,
+     * 앞 화면의 마지막 몇 줄이 다음 화면의 처음에 다시 보이게 한다(읽던 자리를 놓치지 않도록).
+     * 겹치는 줄이 아무리 많아도 최소한 화면의 절반은 넘긴다.
      */
-    fun pageDistance(viewportHeight: Float, coveredTop: Float, coveredBottom: Float, lineHeight: Float): Float {
+    fun pageDistance(
+        viewportHeight: Float,
+        coveredTop: Float,
+        coveredBottom: Float,
+        lineHeight: Float,
+        overlapLines: Int,
+    ): Float {
         val visible = (viewportHeight - coveredTop - coveredBottom).coerceAtLeast(0f)
-        return (visible - lineHeight).coerceAtLeast(visible * 0.5f)
+        return (visible - lineHeight * overlapLines).coerceAtLeast(visible * 0.5f)
     }
 }

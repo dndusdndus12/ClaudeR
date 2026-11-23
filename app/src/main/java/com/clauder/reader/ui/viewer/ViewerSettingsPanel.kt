@@ -130,6 +130,21 @@ fun ViewerSettingsPanel(settings: ViewerSettings, onChange: (ViewerSettings) -> 
 
         HorizontalDivider(color = AppColors.Outline, modifier = Modifier.padding(vertical = 6.dp))
 
+        Stepper(
+            label = "넘길 때 겹치는 줄 수",
+            value = "${settings.pageOverlapLines}줄",
+            onMinus = { onChange(settings.copy(pageOverlapLines = settings.pageOverlapLines - 1)) },
+            onPlus = { onChange(settings.copy(pageOverlapLines = settings.pageOverlapLines + 1)) },
+            canMinus = settings.pageOverlapLines > ViewerSettings.OVERLAP_MIN,
+            canPlus = settings.pageOverlapLines < ViewerSettings.OVERLAP_MAX,
+        )
+        Text(
+            "볼륨 키, 리모컨, 탭으로 한 화면을 넘길 때 앞 화면의 마지막 몇 줄을 다음 화면에 다시 보여 줍니다.",
+            fontSize = 13.sp,
+            color = AppColors.TextSecondary,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(bottom = 6.dp),
+        )
         Toggle(
             title = "볼륨 키로 페이지 넘김",
             detail = "볼륨 아래는 다음 화면, 위는 이전 화면. 블루투스 리모컨도 같은 방식으로 동작합니다.",
@@ -138,7 +153,7 @@ fun ViewerSettingsPanel(settings: ViewerSettings, onChange: (ViewerSettings) -> 
         )
         Toggle(
             title = "끝에서 한 번 더 누르면 다음 화",
-            detail = "회차 끝에서 볼륨 아래를 누르면 다음 화로 넘어가 번역을 시작합니다. 번역마다 API 요금이 듭니다.",
+            detail = "회차 끝에서 볼륨 아래나 리모컨의 다음 버튼을 누르면 다음 화로 넘어가 번역을 시작합니다. 번역마다 API 요금이 듭니다.",
             checked = settings.volumeKeyNextChapter,
             enabled = settings.volumeKeyPaging,
             onChange = { onChange(settings.copy(volumeKeyNextChapter = it)) },

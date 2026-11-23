@@ -39,11 +39,22 @@ class ViewerSettingsTest {
     }
 
     @Test
-    fun `한 번에 넘기는 거리는 보이는 높이에서 한 줄을 뺀 만큼이다`() {
+    fun `한 번에 넘기는 거리는 보이는 높이에서 겹치는 줄만큼을 뺀 값이다`() {
         // 화면 2000, 위 100과 아래 150이 가려짐 → 보이는 높이 1750, 한 줄 60
-        assertEquals(1690f, ViewerTaps.pageDistance(2000f, 100f, 150f, 60f), 0.001f)
+        assertEquals(1750f, ViewerTaps.pageDistance(2000f, 100f, 150f, 60f, overlapLines = 0), 0.001f)
+        assertEquals(1690f, ViewerTaps.pageDistance(2000f, 100f, 150f, 60f, overlapLines = 1), 0.001f)
+        assertEquals(1570f, ViewerTaps.pageDistance(2000f, 100f, 150f, 60f, overlapLines = 3), 0.001f)
         // 막대를 숨기면 가려지는 부분이 줄어 더 많이 넘긴다.
-        assertTrue(ViewerTaps.pageDistance(2000f, 80f, 0f, 60f) > ViewerTaps.pageDistance(2000f, 240f, 250f, 60f))
+        assertTrue(
+            ViewerTaps.pageDistance(2000f, 80f, 0f, 60f, 3) > ViewerTaps.pageDistance(2000f, 240f, 250f, 60f, 3),
+        )
+    }
+
+    @Test
+    fun `겹치는 줄 수의 기본값은 3줄이고 범위를 벗어난 값은 맞춘다`() {
+        assertEquals(3, ViewerSettings().pageOverlapLines)
+        assertEquals(ViewerSettings.OVERLAP_MAX, ViewerSettings(pageOverlapLines = 99).sanitized().pageOverlapLines)
+        assertEquals(ViewerSettings.OVERLAP_MIN, ViewerSettings(pageOverlapLines = -1).sanitized().pageOverlapLines)
     }
 
     @Test
@@ -64,7 +75,9 @@ class ViewerSettingsTest {
 
     @Test
     fun `줄이 화면보다 클 만큼 글자가 커도 최소 절반은 넘긴다`() {
-        assertEquals(500f, ViewerTaps.pageDistance(1000f, 0f, 0f, 900f), 0.001f)
-        assertEquals(0f, ViewerTaps.pageDistance(100f, 80f, 80f, 20f), 0.001f)
+        assertEquals(500f, ViewerTaps.pageDistance(1000f, 0f, 0f, 900f, overlapLines = 1), 0.001f)
+        // 겹치는 줄을 아주 많이 잡아도 최소 절반은 넘긴다.
+        assertEquals(500f, ViewerTaps.pageDistance(1000f, 0f, 0f, 60f, overlapLines = 10), 0.001f)
+        assertEquals(0f, ViewerTaps.pageDistance(100f, 80f, 80f, 20f, overlapLines = 3), 0.001f)
     }
 }
