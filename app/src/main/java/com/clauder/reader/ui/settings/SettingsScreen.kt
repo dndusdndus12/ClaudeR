@@ -31,8 +31,10 @@ import com.clauder.reader.ui.theme.AppColors
 fun SettingsScreen(
     siteRuleCount: Int,
     aiSummary: String,
+    promptSummary: String,
     onOpenSiteRules: () -> Unit,
     onOpenAiSettings: () -> Unit,
+    onOpenPrompts: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -58,7 +60,7 @@ fun SettingsScreen(
         OutlineCard {
             SettingsRow("AI 설정", aiSummary, onOpenAiSettings)
             HorizontalDivider(color = AppColors.Outline)
-            SettingsRow("프롬프트와 용어집", "준비 중 (M3)", null)
+            SettingsRow("프롬프트와 용어집", promptSummary, onOpenPrompts)
         }
 
         SectionTitle("읽기")

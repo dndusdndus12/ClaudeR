@@ -62,6 +62,7 @@ fun AiSettingsScreen(
     models: List<ModelInfo>,
     selectedModelId: String,
     effort: String,
+    cacheTtl: String,
     loadingModels: Boolean,
     modelError: String?,
     onBack: () -> Unit,
@@ -69,6 +70,7 @@ fun AiSettingsScreen(
     onRefreshModels: () -> Unit,
     onSelectModel: (ModelInfo) -> Unit,
     onSelectEffort: (String) -> Unit,
+    onSelectCacheTtl: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().background(AppColors.Background).navigationBarsPadding()) {
         BackTopBar("AI 설정", onBack)
@@ -162,6 +164,24 @@ fun AiSettingsScreen(
                     )
                 }
             }
+            SectionTitle("프롬프트 캐시 유지 시간")
+            OutlineCard {
+                Column(Modifier.padding(16.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChoiceChip("1시간", selected = cacheTtl == "1h", onClick = { onSelectCacheTtl("1h") })
+                        ChoiceChip("5분", selected = cacheTtl == "5m", onClick = { onSelectCacheTtl("5m") })
+                    }
+                    Text(
+                        "매번 똑같이 보내는 프롬프트 부분을 서버가 기억해 두어 입력 요금을 줄입니다. " +
+                            "기억시키는 첫 요청은 조금 더 비싸고(1시간은 2배, 5분은 1.25배), 그 뒤로는 훨씬 싸게 읽습니다. " +
+                            "회차 하나를 읽는 데 5분 넘게 걸린다면 1시간이 유리합니다. " +
+                            "프롬프트가 너무 짧으면(모델에 따라 약 500~4,000토큰 미만) 캐시되지 않습니다.",
+                        color = AppColors.TextSecondary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
+            }
             Column(Modifier.padding(bottom = 24.dp)) {}
         }
     }
@@ -234,6 +254,8 @@ private fun ProviderRow(provider: AiProvider, keyCount: Int, onClick: () -> Unit
 fun AiKeysScreen(
     providerName: String,
     keys: List<ApiKeyEntry>,
+    /** 키가 실패해서 쉬는 중이면 그 설명, 아니면 null */
+    restingStatus: (ApiKeyEntry) -> String?,
     onBack: () -> Unit,
     onAdd: (String) -> Unit,
     onDelete: (id: String) -> Unit,
@@ -250,7 +272,8 @@ fun AiKeysScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Text(
-                "키를 여러 개 등록할 수 있습니다. 지금은 목록의 첫 번째 키로 번역합니다.",
+                "키를 여러 개 등록해 두면, 한 키가 인증 실패, 요청 한도 초과, 크레딧 소진, 서버 과부하로 실패했을 때 " +
+                    "자동으로 다음 키로 다시 시도합니다. 실패한 키는 잠시 쉬게 합니다.",
                 color = AppColors.TextSecondary,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(vertical = 12.dp),
@@ -266,7 +289,10 @@ fun AiKeysScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text("${index + 1}", color = AppColors.TextSecondary, modifier = Modifier.padding(end = 12.dp))
-                        Text(key.masked(), fontFamily = FontFamily.Monospace, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Column(Modifier.weight(1f)) {
+                            Text(key.masked(), fontFamily = FontFamily.Monospace, fontSize = 15.sp)
+                            restingStatus(key)?.let { Text(it, fontSize = 13.sp, color = ErrorText) }
+                        }
                         TextButton(onClick = { pendingDelete = key }) { Text("삭제", color = ErrorText) }
                     }
                 }

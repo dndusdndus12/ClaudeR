@@ -181,7 +181,11 @@ class ClaudeProvider(
                     buildJsonObject {
                         put("type", "text")
                         put("text", request.cachedSystem)
-                        putJsonObject("cache_control") { put("type", "ephemeral") }
+                        putJsonObject("cache_control") {
+                            put("type", "ephemeral")
+                            // 기본(5분)이 아닐 때만 유지 시간을 적는다.
+                            if (request.cacheTtl == "1h") put("ttl", "1h")
+                        }
                     },
                 )
                 request.volatileSystem?.takeIf { it.isNotBlank() }?.let { extra ->

@@ -47,6 +47,8 @@ data class TranslationRequest(
     val userText: String,
     /** "low" 등. null 이면 모델 기본값. */
     val effort: String? = null,
+    /** 프롬프트 캐시 유지 시간: "5m" 또는 "1h" */
+    val cacheTtl: String = "5m",
 )
 
 /** 스트리밍 번역 중에 공급자가 내보내는 사건. */

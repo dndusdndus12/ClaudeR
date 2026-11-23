@@ -45,18 +45,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import com.clauder.reader.ai.ApiException
+import com.clauder.reader.ai.KeyRotator
 import com.clauder.reader.browser.BrowserController
 import com.clauder.reader.browser.BrowserScreen
+import com.clauder.reader.data.SettingsStore
 import com.clauder.reader.data.SiteRule
+import com.clauder.reader.data.db.WorkEntity
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
+import com.clauder.reader.translate.Glossary
 import com.clauder.reader.translate.ReaderController
+import com.clauder.reader.ui.common.BackTopBar
 import com.clauder.reader.ui.preview.ExtractionPreviewScreen
 import com.clauder.reader.ui.settings.AiKeysScreen
 import com.clauder.reader.ui.settings.AiSettingsScreen
+import com.clauder.reader.ui.settings.LongTextEditScreen
+import com.clauder.reader.ui.settings.PromptHubScreen
 import com.clauder.reader.ui.settings.SettingsScreen
 import com.clauder.reader.ui.settings.SiteRuleEditScreen
 import com.clauder.reader.ui.settings.SiteRulesScreen
+import com.clauder.reader.ui.settings.WorkSettingsScreen
 import com.clauder.reader.ui.theme.AppColors
 import com.clauder.reader.ui.theme.ClauderTheme
 import com.clauder.reader.ui.viewer.ViewerScreen
@@ -138,6 +146,12 @@ private sealed interface Screen {
     data class SiteRuleEdit(val index: Int?) : Screen
     data object AiSettings : Screen
     data class AiKeys(val providerId: String) : Screen
+    data object PromptHub : Screen
+    data object EditGlobalPrompt : Screen
+    data object EditGlobalGlossary : Screen
+    data class WorkSettings(val workKey: String) : Screen
+    data class EditWorkPrompt(val workKey: String) : Screen
+    data class EditWorkGlossary(val workKey: String) : Screen
 }
 
 @Composable
@@ -165,6 +179,15 @@ private fun AppRoot(
     val models by remember(providerId) { settings.aiModels(providerId) }.collectAsState(initial = emptyList())
     val modelId by remember(providerId) { settings.aiModelId(providerId) }.collectAsState(initial = "")
     val effort by settings.aiEffort.collectAsState(initial = "")
+    val cacheTtl by settings.aiCacheTtl.collectAsState(initial = SettingsStore.DEFAULT_CACHE_TTL)
+
+    // 프롬프트와 용어집
+    val globalPrompt by settings.globalPrompt.collectAsState(initial = "")
+    val globalGlossary by settings.globalGlossary.collectAsState(initial = "")
+    val works by app.works.all.collectAsState(initial = emptyList())
+    val globalGlossarySummary = remember(globalGlossary) {
+        if (globalGlossary.isBlank()) "항목 없음" else Glossary.parse(globalGlossary).summary()
+    }
     var loadingModels by remember { mutableStateOf(false) }
     var modelError by remember { mutableStateOf<String?>(null) }
 
@@ -269,8 +292,10 @@ private fun AppRoot(
                 modelId.isBlank() -> "모델을 선택하세요"
                 else -> models.firstOrNull { it.id == modelId }?.label ?: modelId
             },
+            promptSummary = (if (globalPrompt.isBlank()) "기본 프롬프트" else "수정한 프롬프트") + " · 전역 용어집 " + globalGlossarySummary,
             onOpenSiteRules = { stack.add(Screen.SiteRules) },
             onOpenAiSettings = { stack.add(Screen.AiSettings) },
+            onOpenPrompts = { stack.add(Screen.PromptHub) },
         )
 
         val top = stack.lastOrNull()
@@ -288,6 +313,7 @@ private fun AppRoot(
                         onNext = reader::goNext,
                         onRetranslate = reader::retranslate,
                         onOpenAiSettings = { stack.add(Screen.AiSettings) },
+                        onOpenWorkSettings = { stack.add(Screen.WorkSettings(reader.state.workKey)) },
                     )
 
                     is Screen.Preview -> ExtractionPreviewScreen(
@@ -339,6 +365,7 @@ private fun AppRoot(
                         models = models,
                         selectedModelId = modelId,
                         effort = effort,
+                        cacheTtl = cacheTtl,
                         loadingModels = loadingModels,
                         modelError = modelError,
                         onBack = ::pop,
@@ -346,11 +373,18 @@ private fun AppRoot(
                         onRefreshModels = ::refreshModels,
                         onSelectModel = { model -> scope.launch { settings.setAiModelId(providerId, model.id) } },
                         onSelectEffort = { value -> scope.launch { settings.setAiEffort(value) } },
+                        onSelectCacheTtl = { value -> scope.launch { settings.setAiCacheTtl(value) } },
                     )
 
                     is Screen.AiKeys -> AiKeysScreen(
                         providerName = app.providers.firstOrNull { it.id == top.providerId }?.displayName.orEmpty(),
                         keys = apiKeys.filter { it.provider == top.providerId },
+                        restingStatus = { key ->
+                            app.keyRotator.cooldownOf(key.id)?.let { rest ->
+                                val left = KeyRotator.restText(app.keyRotator.remainingSeconds(key.id))
+                                "쉬는 중 · ${KeyRotator.reason(rest.kind)} · $left 남음"
+                            }
+                        },
                         onBack = ::pop,
                         onAdd = { value ->
                             scope.launch {
@@ -361,6 +395,110 @@ private fun AppRoot(
                         },
                         onDelete = { id -> scope.launch { app.apiKeys.remove(id) } },
                     )
+
+                    Screen.PromptHub -> PromptHubScreen(
+                        promptCustomized = globalPrompt.isNotBlank(),
+                        glossarySummary = globalGlossarySummary,
+                        works = works,
+                        onBack = ::pop,
+                        onEditPrompt = { stack.add(Screen.EditGlobalPrompt) },
+                        onEditGlossary = { stack.add(Screen.EditGlobalGlossary) },
+                        onOpenWork = { stack.add(Screen.WorkSettings(it)) },
+                    )
+
+                    Screen.EditGlobalPrompt -> LongTextEditScreen(
+                        title = "번역 프롬프트",
+                        description = "모든 작품에 쓰는 번역 지침입니다. 앱이 이 뒤에 \"최종 번역문만 출력\" 같은 고정 지시를 덧붙입니다.",
+                        initial = globalPrompt.ifBlank { app.defaultPrompt },
+                        isGlossary = false,
+                        restoreLabel = "기본값 복원",
+                        restoreText = app.defaultPrompt,
+                        onBack = ::pop,
+                        onSave = { text ->
+                            // 기본 프롬프트와 같으면 "수정 안 함"으로 저장해, 앱의 기본값이 바뀌면 따라가게 한다.
+                            val value = if (text.trim() == app.defaultPrompt.trim()) "" else text.trim()
+                            scope.launch { settings.setGlobalPrompt(value) }
+                            pop()
+                        },
+                    )
+
+                    Screen.EditGlobalGlossary -> LongTextEditScreen(
+                        title = "전역 용어집",
+                        description = "한 줄에 하나씩 原文=번역 형식으로 적습니다. 긴 목록을 한 번에 붙여넣어도 됩니다.",
+                        initial = globalGlossary,
+                        isGlossary = true,
+                        onBack = ::pop,
+                        onSave = { text ->
+                            scope.launch { settings.setGlobalGlossary(text.trim()) }
+                            pop()
+                        },
+                    )
+
+                    is Screen.WorkSettings -> {
+                        val work = works.firstOrNull { it.workKey == top.workKey }
+                        if (work == null) {
+                            // 아직 목록을 읽는 중이거나 등록되지 않은 작품
+                            Column(Modifier.fillMaxSize()) {
+                                BackTopBar("작품 설정", ::pop)
+                                Text(
+                                    "작품 정보를 찾지 못했습니다. 이 작품을 한 번 번역한 뒤 다시 열어 주세요.",
+                                    color = AppColors.TextSecondary,
+                                    modifier = Modifier.padding(16.dp),
+                                )
+                            }
+                        } else {
+                            WorkSettingsScreen(
+                                work = work,
+                                onBack = ::pop,
+                                onSetCustomPrompt = { custom ->
+                                    scope.launch {
+                                        app.works.update(work.workKey) {
+                                            it.copy(promptMode = if (custom) WorkEntity.PROMPT_CUSTOM else WorkEntity.PROMPT_GLOBAL)
+                                        }
+                                    }
+                                },
+                                onEditPrompt = { stack.add(Screen.EditWorkPrompt(work.workKey)) },
+                                onSetUseGlobalGlossary = { use ->
+                                    scope.launch { app.works.update(work.workKey) { it.copy(useGlobalGlossary = use) } }
+                                },
+                                onEditGlossary = { stack.add(Screen.EditWorkGlossary(work.workKey)) },
+                            )
+                        }
+                    }
+
+                    is Screen.EditWorkPrompt -> {
+                        val work = works.firstOrNull { it.workKey == top.workKey }
+                        val currentGlobal = globalPrompt.ifBlank { app.defaultPrompt }
+                        LongTextEditScreen(
+                            title = "작품 전용 프롬프트",
+                            description = "${work?.title.orEmpty()} 에만 쓰는 번역 지침입니다. 전역 프롬프트 대신 사용됩니다.",
+                            // 처음에는 전역 프롬프트에서 시작해 고쳐 쓰게 한다.
+                            initial = work?.customPrompt?.ifBlank { currentGlobal } ?: currentGlobal,
+                            isGlossary = false,
+                            restoreLabel = "전역 프롬프트 불러오기",
+                            restoreText = currentGlobal,
+                            onBack = ::pop,
+                            onSave = { text ->
+                                scope.launch { app.works.update(top.workKey) { it.copy(customPrompt = text.trim()) } }
+                                pop()
+                            },
+                        )
+                    }
+
+                    is Screen.EditWorkGlossary -> {
+                        val work = works.firstOrNull { it.workKey == top.workKey }
+                        LongTextEditScreen(
+                            title = "작품 용어집",
+                            description = "${work?.title.orEmpty()} 에만 쓰는 용어집입니다. 한 줄에 하나씩 原文=번역 형식으로 적습니다.",
+                            initial = work?.glossary.orEmpty(),
+                            isGlossary = true,
+                            onBack = ::pop,
+                            onSave = { text ->
+                                scope.launch { app.works.update(top.workKey) { it.copy(glossary = text.trim()) } }
+                                pop()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -384,8 +522,10 @@ private fun MainTabs(
     onPreview: () -> Unit,
     siteRuleCount: Int,
     aiSummary: String,
+    promptSummary: String,
     onOpenSiteRules: () -> Unit,
     onOpenAiSettings: () -> Unit,
+    onOpenPrompts: () -> Unit,
 ) {
     Scaffold(
         containerColor = AppColors.Background,
@@ -435,7 +575,9 @@ private fun MainTabs(
             when (tab) {
                 Tab.Translate -> Unit
                 Tab.Library -> LibraryPlaceholder(cover)
-                Tab.Settings -> SettingsScreen(siteRuleCount, aiSummary, onOpenSiteRules, onOpenAiSettings, cover)
+                Tab.Settings -> SettingsScreen(
+                    siteRuleCount, aiSummary, promptSummary, onOpenSiteRules, onOpenAiSettings, onOpenPrompts, cover,
+                )
             }
         }
     }

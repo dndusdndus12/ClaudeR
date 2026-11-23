@@ -21,13 +21,16 @@ object PromptBuilder {
     /** 캐시 대상이 되는 시스템 프롬프트: [사용자 프롬프트] + [앱 고정 지시] */
     fun cachedSystem(userPrompt: String): String = userPrompt.trim() + "\n\n" + FIXED_INSTRUCTIONS
 
-    /** 번역할 원문. 첫 줄은 "# 회차 제목", 그 뒤로 문단을 빈 줄로 구분한다. */
-    fun userText(chapter: ExtractedChapter): String = buildString {
-        if (chapter.chapterTitle.isNotBlank()) {
-            append("# ").append(chapter.chapterTitle).append("\n\n")
-        }
-        append(chapter.paragraphs.joinToString("\n\n"))
+    /**
+     * 번역할 원문. 제목이 있으면 첫 줄에 "# 회차 제목"을 두고, 그 뒤로 문단을 빈 줄로 구분한다.
+     * 긴 회차를 나눠 번역할 때는 첫 덩어리에만 제목을 넣는다.
+     */
+    fun userText(title: String, paragraphs: List<String>): String = buildString {
+        if (title.isNotBlank()) append("# ").append(title.trim()).append("\n\n")
+        append(paragraphs.joinToString("\n\n"))
     }
+
+    fun userText(chapter: ExtractedChapter): String = userText(chapter.chapterTitle, chapter.paragraphs)
 
     data class Translated(val title: String, val paragraphs: List<String>)
 

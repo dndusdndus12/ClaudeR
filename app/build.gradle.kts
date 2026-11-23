@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -14,8 +15,8 @@ android {
         applicationId = "com.clauder.reader"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0-m2"
+        versionCode = 4
+        versionName = "0.4.0-m3"
     }
 
     buildTypes {
@@ -35,6 +36,11 @@ android {
     }
 }
 
+// 데이터베이스 구조를 파일로 남겨 두어, 나중에 구조가 바뀔 때 기존 데이터를 안전하게 옮길 수 있게 한다.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -45,6 +51,8 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
 
     testImplementation(libs.junit)
 }

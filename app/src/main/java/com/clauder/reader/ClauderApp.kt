@@ -4,15 +4,23 @@ import android.app.Application
 import com.clauder.reader.ai.AiProvider
 import com.clauder.reader.ai.ClaudeProvider
 import com.clauder.reader.ai.GeminiProvider
+import com.clauder.reader.ai.KeyRotator
 import com.clauder.reader.data.ApiKeyStore
 import com.clauder.reader.data.SecretCrypto
 import com.clauder.reader.data.SettingsStore
+import com.clauder.reader.data.WorkRepository
+import com.clauder.reader.data.db.AppDatabase
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class ClauderApp : Application() {
     val settings: SettingsStore by lazy { SettingsStore(this) }
     val apiKeys: ApiKeyStore by lazy { ApiKeyStore(settings, SecretCrypto()) }
+    private val database: AppDatabase by lazy { AppDatabase.create(this) }
+    val works: WorkRepository by lazy { WorkRepository(database.workDao()) }
+
+    /** 키 순환 상태(어떤 키가 쉬는 중인지). 앱이 켜져 있는 동안 유지된다. */
+    val keyRotator = KeyRotator()
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()

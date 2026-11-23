@@ -45,7 +45,6 @@ import com.clauder.reader.ui.theme.AppColors
 import java.text.NumberFormat
 
 private val ViewerBackground = Color(0xFFF3F5F9)
-private val NoticeBg = Color(0xFFFFF4D6)
 private val ErrorBg = Color(0xFFFDECEC)
 private val ErrorText = Color(0xFFC62828)
 
@@ -58,6 +57,7 @@ fun ViewerScreen(
     onNext: () -> Unit,
     onRetranslate: () -> Unit,
     onOpenAiSettings: () -> Unit,
+    onOpenWorkSettings: () -> Unit,
 ) {
     val chapter = state.chapter
     val translated = remember(state.text) { PromptBuilder.parseTranslation(state.text) }
@@ -83,6 +83,9 @@ fun ViewerScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
+            if (state.workKey.isNotBlank()) {
+                TextButton(onClick = onOpenWorkSettings) { Text("작품 설정") }
+            }
         }
         HorizontalDivider(color = AppColors.Outline)
 
@@ -153,22 +156,12 @@ private fun StatusFooter(state: ReaderState, onRetranslate: () -> Unit, onOpenAi
     Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp)) {
         when (state.phase) {
             ReaderPhase.LOADING_PAGE -> Progress("다음 화를 불러오는 중…")
-            ReaderPhase.REQUESTING -> Progress("번역을 요청하는 중…")
-            ReaderPhase.THINKING -> Progress("모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다.")
-            ReaderPhase.STREAMING -> Progress("번역 중…")
-            ReaderPhase.DONE -> {
-                state.notice?.let { notice ->
-                    Text(
-                        notice,
-                        fontSize = 14.sp,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(NoticeBg, RoundedCornerShape(12.dp))
-                            .padding(14.dp),
-                    )
-                }
-                UsageLine(state)
-            }
+            ReaderPhase.REQUESTING -> Progress(
+                (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state),
+            )
+            ReaderPhase.THINKING -> Progress("모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다." + part(state))
+            ReaderPhase.STREAMING -> Progress("번역 중…" + part(state))
+            ReaderPhase.DONE -> UsageLine(state)
 
             ReaderPhase.ERROR -> {
                 Column(
@@ -195,6 +188,10 @@ private fun StatusFooter(state: ReaderState, onRetranslate: () -> Unit, onOpenAi
     }
 }
 
+/** 긴 회차를 나눠 번역할 때의 진행 표시. 예: " (2/3)" */
+private fun part(state: ReaderState): String =
+    if (state.chunkCount > 1 && state.chunkIndex > 0) " (${state.chunkIndex}/${state.chunkCount})" else ""
+
 @Composable
 private fun Progress(label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -207,8 +204,13 @@ private fun Progress(label: String) {
 private fun UsageLine(state: ReaderState) {
     val usage = state.usage ?: return
     val prefix = if (state.fromCache) "저장된 번역 · " else ""
+    val details = buildList {
+        if (state.modelName.isNotBlank()) add(state.modelName)
+        if (state.glossaryTerms > 0) add("용어집 ${state.glossaryTerms}개 적용")
+        if (state.chunkCount > 1) add("${state.chunkCount}부분으로 나눠 번역")
+    }.joinToString(" · ")
     Text(
-        prefix + usageText(usage) + if (state.modelName.isNotBlank()) "\n${state.modelName}" else "",
+        prefix + usageText(usage) + if (details.isNotBlank()) "\n$details" else "",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = AppColors.TextSecondary,
