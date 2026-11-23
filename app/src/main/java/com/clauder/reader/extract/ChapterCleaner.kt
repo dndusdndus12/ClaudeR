@@ -29,6 +29,16 @@ object ChapterCleaner {
         Regex("""^(上一[章页頁节]|下一[章页頁节]|目录|目錄|书签|書籤|\s|[|｜·])+$"""),
     )
 
+    /** 소설 문장에 나올 수 없는 문구. 줄 길이와 무관하게 지운다. */
+    private val BOILERPLATE_STRONG = listOf(
+        Regex("""欢迎广大书友|歡迎廣大書友"""),
+        Regex("""最新、最快、最火"""),
+        Regex("""手机用户请到|手機用戶請到"""),
+        Regex("""^[（(【\[]?\s*未完待[续續]"""),
+        Regex("""您的支持，就是我最大的动力"""),
+        Regex("""</?(a|p|div|span|br|script)\b[^>]*>""", RegexOption.IGNORE_CASE),
+    )
+
     /** "(本章完)" 같은 회차 끝 표시. 이 줄부터 뒤는 모두 버린다. */
     private val CHAPTER_END = Regex("""^[（(【\[〔]?\s*本章完\s*[）)】\]〕]?[。.]?$""")
 
@@ -49,7 +59,8 @@ object ChapterCleaner {
     private fun compact(s: String) = s.filterNot { it.isWhitespace() }
 
     fun isBoilerplate(line: String): Boolean =
-        line.length <= BOILERPLATE_MAX_LEN && BOILERPLATE.any { it.containsMatchIn(line) }
+        BOILERPLATE_STRONG.any { it.containsMatchIn(line) } ||
+            (line.length <= BOILERPLATE_MAX_LEN && BOILERPLATE.any { it.containsMatchIn(line) })
 
     fun isDivider(line: String): Boolean = DIVIDER.matches(line)
 

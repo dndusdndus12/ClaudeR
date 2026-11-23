@@ -54,6 +54,16 @@ class ChapterCleanerTest {
     }
 
     @Test
+    fun `실제 사이트에서 본 긴 홍보 문구도 지운다`() {
+        // 69shuba 회차 끝에 실제로 붙어 있던 줄(HTML 태그 글자가 그대로 섞여 있음)
+        val promo = "网欢迎广大书友光临阅读，最新、最快、最火的连载作品尽在原创！</a><a>手机用户请到阅读。</a>"
+        val trailer = "（未完待续。如果您喜欢这部作品，欢迎您来投推荐票、月票，您的支持，就是我最大的动力。手机用户请到阅读。）"
+        val r = ChapterCleaner.cleanParagraphs(prose + trailer + promo, "", "")
+        assertEquals(prose, r.paragraphs)
+        assertEquals(2, r.removed)
+    }
+
+    @Test
     fun `긴 소설 문장은 홍보 단어가 들어 있어도 지우지 않는다`() {
         val long = "他在心里默默记住了这个网址一样复杂的口诀，又想起前世在网上看过的那些东西，什么最新网址、什么版权所有，如今想来恍如隔世，不由得轻轻叹了一口气。"
         assertFalse(ChapterCleaner.isBoilerplate(long))

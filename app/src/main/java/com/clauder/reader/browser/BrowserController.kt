@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.clauder.reader.BuildConfig
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.extract.ChapterCleaner
 import com.clauder.reader.extract.ExtractedChapter
@@ -170,6 +171,10 @@ class BrowserController(
                 "first='${chapter.paragraphs.firstOrNull()?.take(30).orEmpty()}' " +
                 "last='${chapter.paragraphs.lastOrNull()?.take(30).orEmpty()}' warnings=${chapter.warnings}",
         )
+        if (BuildConfig.DEBUG) {
+            // 개발용: 추출한 본문 전체를 로그로 남겨 PC에서 검증할 수 있게 한다.
+            chapter.paragraphs.forEachIndexed { i, p -> Log.d(TAG_TEXT, "$i	$p") }
+        }
         return chapter
     }
 
@@ -187,5 +192,6 @@ class BrowserController(
 
     companion object {
         const val TAG = "Clauder"
+        const val TAG_TEXT = "ClauderText"
     }
 }
