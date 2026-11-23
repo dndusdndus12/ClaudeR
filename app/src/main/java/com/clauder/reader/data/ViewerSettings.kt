@@ -19,6 +19,13 @@ data class ViewerSettings(
     val volumeKeyNextChapter: Boolean = false,
     /** 화면 위쪽/아래쪽을 탭하면 한 화면씩 넘기기(가운데 탭은 항상 막대 숨김/표시) */
     val tapPaging: Boolean = false,
+    /**
+     * 블루투스 리모컨이 보내는 "밀기" 터치로 한 화면씩 넘기기.
+     * 키 신호 대신 화면을 미는 동작을 흉내 내는 리모컨(예: R1)을 위한 설정이다.
+     */
+    val remoteSwipePaging: Boolean = true,
+    /** 리모컨의 넘김 방향을 반대로(다음 버튼이 이전으로 동작할 때 켠다) */
+    val remoteSwipeReversed: Boolean = false,
 ) {
     /** 저장된 값이 범위를 벗어나 있어도 화면이 깨지지 않게 맞춘다. */
     fun sanitized() = copy(
@@ -50,6 +57,22 @@ data class ViewerSettings(
 enum class TapZone { PREVIOUS_PAGE, TOGGLE_BARS, NEXT_PAGE }
 
 object ViewerTaps {
+    /**
+     * 리모컨이 보낸 밀기 동작을 페이지 넘김 방향으로 바꾼다.
+     * 왼쪽이나 위로 밀면 다음 화면(책장을 넘기거나 글을 위로 올리는 방향), 오른쪽이나 아래로 밀면 이전 화면이다.
+     *
+     * @param dx, dy 터치를 뗀 지점에서 누른 지점을 뺀 값(px)
+     * @param minDistance 이보다 짧게 움직였으면 밀기가 아니라 탭으로 본다
+     * @return true 다음 화면, false 이전 화면, null 밀기가 아님
+     */
+    fun remoteSwipeForward(dx: Float, dy: Float, minDistance: Float, reversed: Boolean): Boolean? {
+        val horizontal = kotlin.math.abs(dx) >= kotlin.math.abs(dy)
+        val moved = if (horizontal) dx else dy
+        if (kotlin.math.abs(moved) < minDistance) return null
+        val forward = moved < 0
+        return if (reversed) !forward else forward
+    }
+
     /**
      * 탭한 높이가 화면의 어느 구역인지 정한다.
      * 탭으로 넘기기가 꺼져 있으면 어디를 눌러도 막대 숨김/표시이고,

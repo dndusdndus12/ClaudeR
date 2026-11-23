@@ -2,8 +2,11 @@ package com.clauder.reader
 
 import android.content.Intent
 import android.graphics.Color as AndroidColor
+import android.os.Build
 import android.os.Bundle
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
@@ -52,6 +55,7 @@ import com.clauder.reader.browser.BrowserScreen
 import com.clauder.reader.data.SettingsStore
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.data.ViewerSettings as ViewerSettingsData
+import com.clauder.reader.data.ViewerTaps
 import com.clauder.reader.data.db.WorkEntity
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
@@ -69,6 +73,7 @@ import com.clauder.reader.ui.settings.SiteRulesScreen
 import com.clauder.reader.ui.settings.WorkSettingsScreen
 import com.clauder.reader.ui.theme.AppColors
 import com.clauder.reader.ui.theme.ClauderTheme
+import com.clauder.reader.ui.viewer.PageInput
 import com.clauder.reader.ui.viewer.ViewerScreen
 import com.clauder.reader.ui.viewer.ViewerSettingsScreen
 import kotlinx.coroutines.flow.first
@@ -82,8 +87,13 @@ class MainActivity : ComponentActivity() {
     /** 브라우저 화면 아래쪽에 보여 줄 안내(추출 실패 등). 값이 생기면 브라우저 화면으로 돌아간다. */
     private val browserNotice = mutableStateOf<String?>(null)
 
-    /** 뷰어가 열려 있고 키 넘김이 켜져 있을 때만 값이 있다. 인자는 "앞으로 넘기는지". */
-    private var pageKeyHandler: ((forward: Boolean) -> Unit)? = null
+    /** 뷰어가 열려 있는 동안에만 값이 있다. 볼륨 키와 리모컨 입력을 뷰어의 페이지 넘김으로 돌린다. */
+    private var pageInput: PageInput? = null
+
+    /** 리모컨이 보낸 터치 한 번(누름~뗌)을 처리하는 중인지와 누른 위치 */
+    private var remoteTouchActive = false
+    private var remoteDownX = 0f
+    private var remoteDownY = 0f
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -108,7 +118,7 @@ class MainActivity : ComponentActivity() {
                     browser = browser,
                     reader = reader,
                     browserNotice = browserNotice,
-                    registerPageKeys = { handler -> pageKeyHandler = handler },
+                    registerPageInput = { input -> pageInput = input },
                     setDarkSystemBars = ::applySystemBars,
                 )
             }
@@ -133,7 +143,7 @@ class MainActivity : ComponentActivity() {
      * 누름과 뗌을 모두 가로채야 볼륨 조절 창이 뜨지 않는다.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val handler = pageKeyHandler
+        val handler = pageInput?.takeIf { it.keys }?.turn
         val forward = when (event.keyCode) {
             KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_MEDIA_NEXT -> true
             KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_MEDIA_PREVIOUS -> false
@@ -145,6 +155,39 @@ class MainActivity : ComponentActivity() {
             return true
         }
         return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * 블루투스 리모컨 중에는 키 신호 대신 "화면을 빠르게 미는 터치"를 보내는 것이 있다(R1 등).
+     * 뷰어가 열려 있을 때 외부 터치 장치에서 온 밀기 동작을 페이지 넘김으로 바꾼다.
+     * 손가락으로 폰 화면을 만지는 것은 내장 장치라서 여기에 걸리지 않는다.
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val input = pageInput?.takeIf { it.remoteSwipe }
+        val fromRemote = ev.isFromSource(InputDevice.SOURCE_TOUCHSCREEN) &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ev.device?.isExternal == true
+        if (!fromRemote || (input == null && !remoteTouchActive)) return super.dispatchTouchEvent(ev)
+
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                remoteTouchActive = true
+                remoteDownX = ev.x
+                remoteDownY = ev.y
+            }
+
+            MotionEvent.ACTION_UP -> {
+                if (remoteTouchActive && input != null) {
+                    val minDistance = 40 * resources.displayMetrics.density
+                    ViewerTaps.remoteSwipeForward(ev.x - remoteDownX, ev.y - remoteDownY, minDistance, input.remoteSwipeReversed)
+                        ?.let(input.turn)
+                }
+                remoteTouchActive = false
+            }
+
+            MotionEvent.ACTION_CANCEL -> remoteTouchActive = false
+        }
+        // 리모컨의 터치가 화면의 버튼이나 글을 건드리지 않게 여기서 끝낸다.
+        return true
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -204,7 +247,7 @@ private fun AppRoot(
     browser: BrowserController,
     reader: ReaderController,
     browserNotice: MutableState<String?>,
-    registerPageKeys: (((forward: Boolean) -> Unit)?) -> Unit,
+    registerPageInput: (PageInput?) -> Unit,
     setDarkSystemBars: (Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
@@ -358,7 +401,7 @@ private fun AppRoot(
                         state = reader.state,
                         settings = viewerSettings,
                         onSettingsChange = saveViewerSettings,
-                        registerPageKeys = registerPageKeys,
+                        registerPageInput = registerPageInput,
                         setDarkSystemBars = setDarkSystemBars,
                         onBack = {
                             reader.close()

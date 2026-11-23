@@ -25,7 +25,9 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -71,6 +73,20 @@ import com.clauder.reader.ui.theme.AppColors
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 
+/**
+ * 뷰어가 화면 밖(액티비티)에서 받아야 하는 페이지 넘김 입력.
+ * 볼륨 키와 리모컨의 터치는 화면 요소가 아니라 액티비티가 먼저 받기 때문에 이렇게 등록해 둔다.
+ */
+class PageInput(
+    /** 볼륨 키 등 키 입력으로 넘길지 */
+    val keys: Boolean,
+    /** 리모컨의 밀기 터치로 넘길지 */
+    val remoteSwipe: Boolean,
+    val remoteSwipeReversed: Boolean,
+    /** 실제로 넘기는 동작. 인자는 "앞으로 넘기는지". */
+    val turn: (forward: Boolean) -> Unit,
+)
+
 private val ErrorBg = Color(0xFFFDECEC)
 private val ErrorText = Color(0xFFC62828)
 private val TopBarHeight = 52.dp
@@ -81,7 +97,7 @@ private val BottomBarHeight = 62.dp
  * - 화면을 탭하면 위아래 막대가 숨겨지거나 다시 나타난다.
  * - 볼륨 키(블루투스 리모컨)로 한 화면씩 넘긴다.
  *
- * @param registerPageKeys 페이지 넘김 키를 받을 함수를 등록한다(null 이면 해제). 인자는 "앞으로 넘기는지".
+ * @param registerPageInput 볼륨 키와 리모컨 입력을 받을 곳을 등록한다(null 이면 해제).
  * @param setDarkSystemBars 어두운 테마일 때 상태 표시줄 아이콘을 밝게 바꾼다.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -96,7 +112,7 @@ fun ViewerScreen(
     onRetranslate: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenWorkSettings: () -> Unit,
-    registerPageKeys: (((forward: Boolean) -> Unit)?) -> Unit,
+    registerPageInput: (PageInput?) -> Unit,
     setDarkSystemBars: (Boolean) -> Unit,
 ) {
     val chapter = state.chapter
@@ -149,9 +165,16 @@ fun ViewerScreen(
         scope.launch { listState.scrollBy(if (forward) distance else -distance) }
     }
 
-    DisposableEffect(settings.volumeKeyPaging) {
-        registerPageKeys(if (settings.volumeKeyPaging) ({ forward -> turnPage(forward) }) else null)
-        onDispose { registerPageKeys(null) }
+    DisposableEffect(settings.volumeKeyPaging, settings.remoteSwipePaging, settings.remoteSwipeReversed) {
+        registerPageInput(
+            PageInput(
+                keys = settings.volumeKeyPaging,
+                remoteSwipe = settings.remoteSwipePaging,
+                remoteSwipeReversed = settings.remoteSwipeReversed,
+                turn = { forward -> turnPage(forward) },
+            ),
+        )
+        onDispose { registerPageInput(null) }
     }
 
     Box(Modifier.fillMaxSize().background(palette.background)) {
@@ -288,7 +311,9 @@ fun ViewerScreen(
             ViewerSettingsPanel(
                 settings = settings,
                 onChange = onSettingsChange,
-                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
             )
         }
     }

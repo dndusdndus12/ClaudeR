@@ -47,6 +47,22 @@ class ViewerSettingsTest {
     }
 
     @Test
+    fun `리모컨의 밀기 동작을 넘김 방향으로 바꾼다`() {
+        val min = 100f
+        // R1 리모컨에서 실제로 기록한 값: 한 버튼은 +373px, 다른 버튼은 -372px 가로 이동(세로 이동 없음)
+        assertEquals(false, ViewerTaps.remoteSwipeForward(373f, 0f, min, reversed = false))
+        assertEquals(true, ViewerTaps.remoteSwipeForward(-372f, 0f, min, reversed = false))
+        // 방향 반대로 설정
+        assertEquals(true, ViewerTaps.remoteSwipeForward(373f, 0f, min, reversed = true))
+        assertEquals(false, ViewerTaps.remoteSwipeForward(-372f, 0f, min, reversed = true))
+        // 위아래로 미는 리모컨: 위로 밀면 다음, 아래로 밀면 이전
+        assertEquals(true, ViewerTaps.remoteSwipeForward(10f, -500f, min, reversed = false))
+        assertEquals(false, ViewerTaps.remoteSwipeForward(-10f, 500f, min, reversed = false))
+        // 거의 움직이지 않은 터치는 밀기가 아니다.
+        assertEquals(null, ViewerTaps.remoteSwipeForward(30f, -20f, min, reversed = false))
+    }
+
+    @Test
     fun `줄이 화면보다 클 만큼 글자가 커도 최소 절반은 넘긴다`() {
         assertEquals(500f, ViewerTaps.pageDistance(1000f, 0f, 0f, 900f), 0.001f)
         assertEquals(0f, ViewerTaps.pageDistance(100f, 80f, 80f, 20f), 0.001f)

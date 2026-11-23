@@ -144,6 +144,19 @@ fun ViewerSettingsPanel(settings: ViewerSettings, onChange: (ViewerSettings) -> 
             onChange = { onChange(settings.copy(volumeKeyNextChapter = it)) },
         )
         Toggle(
+            title = "리모컨 밀기 동작으로 페이지 넘김",
+            detail = "버튼을 누르면 화면을 미는 동작을 보내는 블루투스 리모컨(R1 등)으로 한 화면씩 넘깁니다.",
+            checked = settings.remoteSwipePaging,
+            onChange = { onChange(settings.copy(remoteSwipePaging = it)) },
+        )
+        Toggle(
+            title = "리모컨 방향 반대로",
+            detail = "리모컨의 다음 버튼이 이전 화면으로 넘어가면 켜세요.",
+            checked = settings.remoteSwipeReversed,
+            enabled = settings.remoteSwipePaging,
+            onChange = { onChange(settings.copy(remoteSwipeReversed = it)) },
+        )
+        Toggle(
             title = "탭으로 페이지 넘김",
             detail = "화면 위쪽 1/4을 누르면 이전 화면, 아래쪽 1/4을 누르면 다음 화면. 가운데는 위아래 막대를 숨기거나 보입니다.",
             checked = settings.tapPaging,
