@@ -125,8 +125,10 @@ object ChapterCleaner {
         val cleaned = cleanParagraphs(raw.paragraphs, chapterTitle, workTitle)
         val chars = cleaned.paragraphs.sumOf { it.length }
         val status = when {
-            chars >= MIN_CHARS -> ExtractionStatus.OK
+            // 보안 확인 페이지의 안내문도 글자 수가 꽤 되므로, 확실한 신호가 있으면 글자 수와 무관하게 실패로 본다.
             raw.blocked -> ExtractionStatus.BLOCKED
+            chars >= MIN_CHARS -> ExtractionStatus.OK
+            raw.captchaWidget -> ExtractionStatus.BLOCKED
             else -> ExtractionStatus.TOO_SHORT
         }
         return ExtractedChapter(

@@ -108,9 +108,14 @@ class ChapterCleanerTest {
         val short = ChapterCleaner.finish(RawExtraction(paragraphs = listOf("짧은 글")))
         assertEquals(ExtractionStatus.TOO_SHORT, short.status)
 
-        // 보안 확인 요소가 있어도 본문이 충분하면 성공으로 본다.
-        val okWithWidget = ChapterCleaner.finish(RawExtraction(paragraphs = prose, blocked = true))
-        assertEquals(ExtractionStatus.OK, okWithWidget.status)
+        // 실제로 겪은 사례: 보안 확인 페이지의 안내문이 100자를 넘어도 성공으로 보면 안 된다.
+        val notice = "This website uses a security service to protect against malicious bots. This page is displayed while the website verifies you are not a bot."
+        val challenge = ChapterCleaner.finish(RawExtraction(paragraphs = listOf(notice), blocked = true))
+        assertEquals(ExtractionStatus.BLOCKED, challenge.status)
+
+        // 사람 확인 위젯만 있는 정상 페이지는 본문이 충분하면 성공, 본문이 없으면 보안 확인으로 본다.
+        assertEquals(ExtractionStatus.OK, ChapterCleaner.finish(RawExtraction(paragraphs = prose, captchaWidget = true)).status)
+        assertEquals(ExtractionStatus.BLOCKED, ChapterCleaner.finish(RawExtraction(paragraphs = listOf("확인 중"), captchaWidget = true)).status)
     }
 
     @Test

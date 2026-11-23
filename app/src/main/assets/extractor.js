@@ -287,8 +287,11 @@ function (rule) {
 
   // ---------- 보안 확인(봇 검사) 페이지 여부 ----------
 
+  // 확실한 신호: 보안 확인 페이지에만 있는 요소
   var blocked = typeof window._cf_chl_opt !== 'undefined' ||
-    !!document.querySelector('#challenge-form, #challenge-stage, #challenge-error-text, #cf-wrapper, iframe[src*="challenges.cloudflare.com"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"]');
+    !!document.querySelector('#challenge-form, #challenge-stage, #challenge-error-text, #challenge-running, #cf-wrapper, #cf-challenge-running');
+  // 약한 신호: 사람 확인 위젯(정상 페이지의 로그인/댓글란에도 있을 수 있음)
+  var captchaWidget = !!document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="recaptcha"], iframe[src*="hcaptcha"], .cf-turnstile, .g-recaptcha, .h-captcha');
 
   return {
     url: location.href,
@@ -302,6 +305,7 @@ function (rule) {
     nextClickable: next.clickable,
     prevClickable: prev.clickable,
     blocked: blocked,
+    captchaWidget: captchaWidget,
     contentSource: contentSource,
     contentPath: contentPath,
     warnings: warnings

@@ -15,7 +15,10 @@ data class RawExtraction(
     val prevUrl: String? = null,
     val nextClickable: Boolean = false,
     val prevClickable: Boolean = false,
+    /** 보안 확인 페이지에만 있는 요소가 발견됨 */
     val blocked: Boolean = false,
+    /** 사람 확인 위젯이 있음(정상 페이지에도 있을 수 있는 약한 신호) */
+    val captchaWidget: Boolean = false,
     val contentSource: String = "none",
     val contentPath: String = "",
     val warnings: List<String> = emptyList(),
