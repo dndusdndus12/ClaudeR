@@ -22,12 +22,16 @@ class WorkRepository(private val works: WorkDao, private val chapters: ChapterDa
     /** 작품별 저장된 회차 수 */
     val chapterCounts: Flow<List<WorkChapterCount>> = chapters.observeCounts()
 
+    /** 마지막으로 진입한 회차가 번역까지 끝나 저장되어 있는 작품들 */
+    val worksWithLastChapterSaved: Flow<List<String>> = chapters.observeWorksWithLastChapterSaved()
+
     fun observe(key: String): Flow<WorkEntity?> = works.observe(key)
 
     suspend fun get(key: String): WorkEntity? = works.get(key)
 
     /**
-     * 읽으려는 회차의 작품을 등록(이미 있으면 마지막으로 본 회차만 갱신)하고 돌려준다.
+     * 회차에 진입했음을 기록한다: 작품을 등록(이미 있으면 마지막으로 진입한 회차만 갱신)하고 돌려준다.
+     * 번역이 끝나기 전에 앱이 꺼져도 "어디까지 갔는지"는 남도록, 번역을 시작하기 전에 부른다.
      * 작품 전용 프롬프트와 용어집은 건드리지 않는다.
      */
     suspend fun touch(chapter: ExtractedChapter): WorkEntity {
@@ -37,7 +41,8 @@ class WorkRepository(private val works: WorkDao, private val chapters: ChapterDa
         val work = (existing ?: WorkEntity(workKey = key, host = WorkKey.hostOf(key), title = "", createdAt = now)).copy(
             // 작품명은 처음 알게 된 것을 유지하되, 비어 있었으면 채운다.
             title = existing?.title?.takeIf { it.isNotBlank() } ?: chapter.workTitle.ifBlank { key },
-            lastChapterUrl = chapter.url,
+            // 저장된 회차의 주소(# 뒤를 뺀 것)와 같은 모양으로 맞춰야 서로 비교할 수 있다.
+            lastChapterUrl = chapter.url.substringBefore('#'),
             lastChapterTitle = chapter.chapterTitle,
             updatedAt = now,
         )

@@ -124,6 +124,10 @@ interface ChapterDao {
     @Query("SELECT workKey, COUNT(*) AS count FROM chapters GROUP BY workKey")
     fun observeCounts(): Flow<List<WorkChapterCount>>
 
+    /** 마지막으로 진입한 회차의 번역이 저장되어 있는 작품들의 열쇠 */
+    @Query("SELECT w.workKey FROM works w INNER JOIN chapters c ON c.url = w.lastChapterUrl")
+    fun observeWorksWithLastChapterSaved(): Flow<List<String>>
+
     @Query("DELETE FROM chapters WHERE workKey = :workKey")
     suspend fun deleteForWork(workKey: String)
 }

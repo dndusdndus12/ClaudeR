@@ -282,13 +282,19 @@ private fun AppRoot(
     val works by app.works.all.collectAsState(initial = emptyList())
     val chapterCountList by app.works.chapterCounts.collectAsState(initial = emptyList())
     val chapterCounts = remember(chapterCountList) { chapterCountList.associate { it.workKey to it.count } }
+    val lastSavedList by app.works.worksWithLastChapterSaved.collectAsState(initial = emptyList())
+    val lastChapterSaved = remember(lastSavedList) { lastSavedList.toSet() }
 
-    /** 저장된 회차를 뷰어로 연다. 저장된 번역이 없으면 그 페이지를 브라우저에 열고 번역하도록 안내한다. */
-    fun openSavedChapter(url: String) {
+    /**
+     * 회차를 이어서 본다. 번역이 저장되어 있으면 뷰어로 바로 열고,
+     * 진입만 하고 번역이 끝나지 않은 회차면 사이트에서 그 페이지를 열어 번역 버튼을 누르게 한다.
+     */
+    fun openSavedChapter(url: String, title: String = "") {
         if (url.isBlank()) return
         reader.openSaved(url) {
             browser.load(url)
-            browserNotice.value = "이 회차는 저장된 번역이 없습니다. 페이지가 열리면 번역 버튼을 눌러 주세요."
+            val name = if (title.isBlank()) "이 회차" else "\"$title\""
+            browserNotice.value = "${name}는 아직 번역되지 않았습니다. 페이지가 열리면 번역 버튼을 눌러 주세요."
         }
         stack.add(Screen.Viewer)
     }
@@ -407,7 +413,8 @@ private fun AppRoot(
             onOpenViewerSettings = { stack.add(Screen.ViewerSettings) },
             works = works,
             chapterCounts = chapterCounts,
-            onResumeWork = { work -> openSavedChapter(work.lastChapterUrl) },
+            lastChapterSaved = lastChapterSaved,
+            onResumeWork = { work -> openSavedChapter(work.lastChapterUrl, work.lastChapterTitle) },
             onOpenWorkChapters = { work -> stack.add(Screen.ChapterList(work.workKey)) },
             onOpenWorkSettings = { work -> stack.add(Screen.WorkSettings(work.workKey)) },
             onOpenWorkInBrowser = { work ->
@@ -678,6 +685,7 @@ private fun MainTabs(
     onOpenViewerSettings: () -> Unit,
     works: List<WorkEntity>,
     chapterCounts: Map<String, Int>,
+    lastChapterSaved: Set<String>,
     onResumeWork: (WorkEntity) -> Unit,
     onOpenWorkChapters: (WorkEntity) -> Unit,
     onOpenWorkSettings: (WorkEntity) -> Unit,
@@ -734,6 +742,7 @@ private fun MainTabs(
                 Tab.Library -> LibraryScreen(
                     works = works,
                     chapterCounts = chapterCounts,
+                    lastChapterSaved = lastChapterSaved,
                     onResume = onResumeWork,
                     onOpenChapters = onOpenWorkChapters,
                     onOpenSettings = onOpenWorkSettings,

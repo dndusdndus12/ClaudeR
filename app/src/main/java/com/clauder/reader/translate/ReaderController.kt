@@ -17,6 +17,7 @@ import com.clauder.reader.data.ApiKeyEntry
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.data.WorkRepository
 import com.clauder.reader.data.db.ChapterEntity
+import com.clauder.reader.data.db.WorkEntity
 import com.clauder.reader.extract.ExtractedChapter
 import com.clauder.reader.extract.ExtractionStatus
 import kotlinx.coroutines.CancellationException
@@ -106,8 +107,11 @@ class ReaderController(
             openCount = ++opens,
         )
         job = scope.launch {
+            // 번역보다 먼저 "이 회차에 진입했다"는 것부터 기록한다.
+            // 번역 도중에 앱이 꺼져도 이어보기가 이 회차를 가리키게 하기 위함이다.
+            val work = app.works.touch(chapter)
             val saved = if (forceRetranslate) null else app.works.chapter(url)
-            if (saved != null) showSaved(saved, live = chapter) else translate(chapter, url)
+            if (saved != null) showSaved(saved, live = chapter) else translate(chapter, url, work)
         }
     }
 
@@ -201,7 +205,7 @@ class ReaderController(
         }
     }
 
-    private suspend fun translate(chapter: ExtractedChapter, url: String) {
+    private suspend fun translate(chapter: ExtractedChapter, url: String, work: WorkEntity) {
         val settings = app.settings
         val providerId = settings.aiProvider.first().ifBlank { app.providers.first().id }
         val provider = app.provider(providerId)
@@ -217,8 +221,7 @@ class ReaderController(
             return
         }
 
-        // 작품 등록(처음이면)과 작품별 설정 읽기
-        val work = app.works.touch(chapter)
+        // 작품별 설정 읽기
         val prompt = if (work.usesCustomPrompt) work.customPrompt else settings.globalPrompt.first().ifBlank { app.defaultPrompt }
         val globalTerms = if (work.useGlobalGlossary) Glossary.parse(settings.globalGlossary.first()).entries else emptyList()
         val glossary = Glossary.merge(globalTerms, Glossary.parse(work.glossary).entries)

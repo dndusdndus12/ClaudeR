@@ -50,15 +50,18 @@ import java.util.Date
 import java.util.Locale
 
 private val DangerText = Color(0xFFC62828)
+private val PendingText = Color(0xFF9A6700)
 
 /**
  * 서재 탭: 번역해서 읽은 작품 목록. 작품을 누르면 마지막으로 보던 회차를 이어서 본다.
  * @param chapterCounts 작품 열쇠 → 저장된 회차 수
+ * @param lastChapterSaved 마지막으로 진입한 회차의 번역이 저장되어 있는 작품들의 열쇠
  */
 @Composable
 fun LibraryScreen(
     works: List<WorkEntity>,
     chapterCounts: Map<String, Int>,
+    lastChapterSaved: Set<String>,
     onResume: (WorkEntity) -> Unit,
     onOpenChapters: (WorkEntity) -> Unit,
     onOpenSettings: (WorkEntity) -> Unit,
@@ -112,6 +115,7 @@ fun LibraryScreen(
                     WorkRow(
                         work = work,
                         savedCount = chapterCounts[work.workKey] ?: 0,
+                        lastSaved = work.workKey in lastChapterSaved,
                         onResume = { onResume(work) },
                         onOpenChapters = { onOpenChapters(work) },
                         onOpenSettings = { onOpenSettings(work) },
@@ -149,6 +153,7 @@ fun LibraryScreen(
 private fun WorkRow(
     work: WorkEntity,
     savedCount: Int,
+    lastSaved: Boolean,
     onResume: () -> Unit,
     onOpenChapters: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -192,6 +197,16 @@ private fun WorkRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            // 마지막 회차에 진입만 하고 번역이 끝나지 않은 경우: 누르면 사이트에서 그 회차를 연다.
+            if (!lastSaved && work.lastChapterUrl.isNotBlank()) {
+                Text(
+                    "이 회차는 아직 번역 전 · 누르면 사이트에서 엽니다",
+                    fontSize = 13.sp,
+                    color = PendingText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Box {
             IconButton(onClick = { menuOpen = true }) {
