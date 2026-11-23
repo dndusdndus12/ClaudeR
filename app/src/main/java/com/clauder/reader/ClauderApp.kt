@@ -8,6 +8,7 @@ import com.clauder.reader.ai.KeyRotator
 import com.clauder.reader.data.ApiKeyStore
 import com.clauder.reader.data.SecretCrypto
 import com.clauder.reader.data.SettingsStore
+import com.clauder.reader.data.UsageRepository
 import com.clauder.reader.data.WorkRepository
 import com.clauder.reader.data.db.AppDatabase
 import okhttp3.OkHttpClient
@@ -18,6 +19,7 @@ class ClauderApp : Application() {
     val apiKeys: ApiKeyStore by lazy { ApiKeyStore(settings, SecretCrypto()) }
     private val database: AppDatabase by lazy { AppDatabase.create(this) }
     val works: WorkRepository by lazy { WorkRepository(database.workDao(), database.chapterDao()) }
+    val usage: UsageRepository by lazy { UsageRepository(database.usageDao()) }
 
     /** 키 순환 상태(어떤 키가 쉬는 중인지). 앱이 켜져 있는 동안 유지된다. */
     val keyRotator = KeyRotator()

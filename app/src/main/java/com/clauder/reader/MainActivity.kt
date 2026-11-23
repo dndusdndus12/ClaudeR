@@ -10,6 +10,8 @@ import android.view.MotionEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -28,6 +31,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -43,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -55,6 +60,11 @@ import com.clauder.reader.ai.ApiException
 import com.clauder.reader.ai.KeyRotator
 import com.clauder.reader.browser.BrowserController
 import com.clauder.reader.browser.BrowserScreen
+import com.clauder.reader.data.BackupCodec
+import com.clauder.reader.data.BackupFormatException
+import com.clauder.reader.data.BackupManager
+import com.clauder.reader.data.Pricing
+import com.clauder.reader.data.SettingsBackup
 import com.clauder.reader.data.SettingsStore
 import com.clauder.reader.data.SiteRule
 import com.clauder.reader.data.ViewerSettings as ViewerSettingsData
@@ -71,7 +81,11 @@ import com.clauder.reader.ui.preview.ExtractionPreviewScreen
 import com.clauder.reader.ui.settings.AiKeysScreen
 import com.clauder.reader.ui.settings.AiSettingsScreen
 import com.clauder.reader.ui.settings.LongTextEditScreen
+import com.clauder.reader.ui.settings.PriceEditScreen
+import com.clauder.reader.ui.settings.PriceListScreen
 import com.clauder.reader.ui.settings.PromptHubScreen
+import com.clauder.reader.ui.settings.UsageScreen
+import com.clauder.reader.ui.settings.currentMonthKey
 import com.clauder.reader.ui.settings.SettingsScreen
 import com.clauder.reader.ui.settings.SiteRuleEditScreen
 import com.clauder.reader.ui.settings.SiteRulesScreen
@@ -81,8 +95,10 @@ import com.clauder.reader.ui.theme.ClauderTheme
 import com.clauder.reader.ui.viewer.PageInput
 import com.clauder.reader.ui.viewer.ViewerScreen
 import com.clauder.reader.ui.viewer.ViewerSettingsScreen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -255,6 +271,9 @@ private sealed interface Screen {
     data object PromptHub : Screen
     data object ViewerSettings : Screen
     data class ChapterList(val workKey: String) : Screen
+    data object Usage : Screen
+    data object PriceList : Screen
+    data class PriceEdit(val modelId: String) : Screen
     data object EditGlobalPrompt : Screen
     data object EditGlobalGlossary : Screen
     data class WorkSettings(val workKey: String) : Screen
@@ -303,6 +322,51 @@ private fun AppRoot(
     val chapterCounts = remember(chapterCountList) { chapterCountList.associate { it.workKey to it.count } }
     val lastSavedList by app.works.worksWithLastChapterSaved.collectAsState(initial = emptyList())
     val lastChapterSaved = remember(lastSavedList) { lastSavedList.toSet() }
+
+    // 비용
+    val monthlyUsage by app.usage.monthly.collectAsState(initial = emptyList())
+    val recentUsage by remember { app.usage.recent(30) }.collectAsState(initial = emptyList())
+    val customPrices by settings.modelPrices.collectAsState(initial = emptyMap())
+
+    // 설정 내보내기와 가져오기
+    val context = LocalContext.current
+    var dataMessage by remember { mutableStateOf<String?>(null) }
+    var pendingImport by remember { mutableStateOf<SettingsBackup?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            scope.launch {
+                dataMessage = try {
+                    val text = BackupCodec.encode(BackupManager.export(app))
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                            ?: error("파일을 열 수 없습니다.")
+                    }
+                    "설정을 내보냈습니다. API 키는 파일에 들어 있지 않습니다."
+                } catch (e: Exception) {
+                    "내보내지 못했습니다: ${e.message}"
+                }
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                try {
+                    val text = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                            ?: error("파일을 열 수 없습니다.")
+                    }
+                    // 바로 덮어쓰지 않고, 무엇이 들어 있는지 보여 준 뒤 확인을 받는다.
+                    pendingImport = BackupCodec.decode(text)
+                } catch (e: BackupFormatException) {
+                    dataMessage = e.message
+                } catch (e: Exception) {
+                    dataMessage = "파일을 읽지 못했습니다: ${e.message}"
+                }
+            }
+        }
+    }
 
     /**
      * 회차를 이어서 본다. 번역이 저장되어 있으면 뷰어로 바로 열고,
@@ -393,6 +457,31 @@ private fun AppRoot(
         pop()
     }
 
+    pendingImport?.let { backup ->
+        ImportConfirmDialog(
+            backup = backup,
+            onConfirm = {
+                pendingImport = null
+                scope.launch {
+                    dataMessage = try {
+                        BackupManager.import(app, backup)
+                        "설정을 가져왔습니다. ${backup.summary()}"
+                    } catch (e: Exception) {
+                        "가져오지 못했습니다: ${e.message}"
+                    }
+                }
+            },
+            onDismiss = { pendingImport = null },
+        )
+    }
+    dataMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { dataMessage = null },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { dataMessage = null }) { Text("확인") } },
+        )
+    }
+
     Box(Modifier.fillMaxSize()) {
         // 브라우저(WebView)는 다른 화면에 가려져 있어도 계속 붙어 있어야
         // 뷰어에서 다음 화를 불러올 때 페이지가 정상적으로 로드된다.
@@ -430,6 +519,12 @@ private fun AppRoot(
             onOpenPrompts = { stack.add(Screen.PromptHub) },
             viewerSummary = viewerSummary(viewerSettings),
             onOpenViewerSettings = { stack.add(Screen.ViewerSettings) },
+            usageSummary = monthlyUsage.firstOrNull { it.month == currentMonthKey() }
+                ?.let { "이번 달 ${it.costUsd?.let(Pricing::formatUsd) ?: "단가 없음"} · 번역 ${it.requests}회" }
+                ?: "이번 달 기록 없음",
+            onOpenUsage = { stack.add(Screen.Usage) },
+            onExport = { exportLauncher.launch("clauder-settings.json") },
+            onImport = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
             works = works,
             chapterCounts = chapterCounts,
             lastChapterSaved = lastChapterSaved,
@@ -550,6 +645,36 @@ private fun AppRoot(
                     )
 
                     Screen.ViewerSettings -> ViewerSettingsScreen(viewerSettings, saveViewerSettings, onBack = ::pop)
+
+                    Screen.Usage -> UsageScreen(
+                        monthly = monthlyUsage,
+                        recent = recentUsage,
+                        onBack = ::pop,
+                        onOpenPrices = { stack.add(Screen.PriceList) },
+                    )
+
+                    Screen.PriceList -> PriceListScreen(
+                        models = models,
+                        custom = customPrices,
+                        onBack = ::pop,
+                        onEdit = { stack.add(Screen.PriceEdit(it)) },
+                    )
+
+                    is Screen.PriceEdit -> PriceEditScreen(
+                        modelLabel = models.firstOrNull { it.id == top.modelId }?.label ?: top.modelId,
+                        modelId = top.modelId,
+                        current = Pricing.priceFor(top.modelId, customPrices),
+                        isCustom = top.modelId in customPrices,
+                        onBack = ::pop,
+                        onSave = { price ->
+                            scope.launch { settings.setModelPrices(customPrices + (top.modelId to price)) }
+                            pop()
+                        },
+                        onReset = {
+                            scope.launch { settings.setModelPrices(customPrices - top.modelId) }
+                            pop()
+                        },
+                    )
 
                     is Screen.ChapterList -> {
                         val saved by remember(top.workKey) { app.works.chaptersOf(top.workKey) }.collectAsState(initial = emptyList())
@@ -680,6 +805,24 @@ private fun viewerSummary(v: ViewerSettingsData): String {
         if (v.volumeKeyPaging) " · 볼륨 키 넘김" else ""
 }
 
+/** 설정 가져오기 전에 파일의 내용을 보여 주고 확인을 받는다. */
+@Composable
+private fun ImportConfirmDialog(backup: SettingsBackup, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("설정 가져오기") },
+        text = {
+            Text(
+                "이 파일의 내용:\n${backup.summary()}\n\n" +
+                    "지금의 프롬프트, 용어집, 사이트 규칙, 뷰어 설정, 단가가 파일의 내용으로 바뀝니다. " +
+                    "저장된 번역, 읽던 위치, API 키는 그대로 유지됩니다.",
+            )
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("가져오기") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
+}
+
 /** 모델 목록을 처음 불러왔을 때 골라 둘 기본 모델 */
 private const val DEFAULT_MODEL_ID = "claude-opus-5-5"
 
@@ -703,6 +846,10 @@ private fun MainTabs(
     onOpenPrompts: () -> Unit,
     viewerSummary: String,
     onOpenViewerSettings: () -> Unit,
+    usageSummary: String,
+    onOpenUsage: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
     works: List<WorkEntity>,
     chapterCounts: Map<String, Int>,
     lastChapterSaved: Set<String>,
@@ -775,6 +922,10 @@ private fun MainTabs(
                     aiSummary = aiSummary,
                     promptSummary = promptSummary,
                     viewerSummary = viewerSummary,
+                    usageSummary = usageSummary,
+                    onOpenUsage = onOpenUsage,
+                    onExport = onExport,
+                    onImport = onImport,
                     onOpenSiteRules = onOpenSiteRules,
                     onOpenAiSettings = onOpenAiSettings,
                     onOpenPrompts = onOpenPrompts,

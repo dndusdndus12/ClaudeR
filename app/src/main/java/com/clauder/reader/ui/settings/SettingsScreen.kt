@@ -33,10 +33,14 @@ fun SettingsScreen(
     aiSummary: String,
     promptSummary: String,
     viewerSummary: String,
+    usageSummary: String,
     onOpenSiteRules: () -> Unit,
     onOpenAiSettings: () -> Unit,
     onOpenPrompts: () -> Unit,
     onOpenViewerSettings: () -> Unit,
+    onOpenUsage: () -> Unit,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -68,6 +72,15 @@ fun SettingsScreen(
         SectionTitle("읽기")
         OutlineCard {
             SettingsRow("뷰어 설정", viewerSummary, onOpenViewerSettings)
+        }
+
+        SectionTitle("비용과 데이터")
+        OutlineCard {
+            SettingsRow("사용량과 비용", usageSummary, onOpenUsage)
+            HorizontalDivider(color = AppColors.Outline)
+            SettingsRow("설정 내보내기", "프롬프트, 용어집, 규칙, 단가를 JSON 파일로 저장 · API 키는 제외", onExport)
+            HorizontalDivider(color = AppColors.Outline)
+            SettingsRow("설정 가져오기", "내보낸 JSON 파일로 지금의 설정을 바꿉니다", onImport)
         }
 
         Text(

@@ -61,6 +61,29 @@ class WorkRepository(private val works: WorkDao, private val chapters: ChapterDa
         works.delete(key)
     }
 
+    /** 내보내기용: 모든 작품의 설정(번역문과 읽던 위치는 빼고) */
+    suspend fun exportSettings(): List<WorkBackup> = works.getAll().map {
+        WorkBackup(it.workKey, it.host, it.title, it.promptMode, it.customPrompt, it.useGlobalGlossary, it.glossary)
+    }
+
+    /** 가져오기: 이미 있는 작품은 설정만 바꾸고, 없는 작품은 새로 등록한다. */
+    suspend fun importSettings(items: List<WorkBackup>) {
+        val now = System.currentTimeMillis()
+        items.filter { it.workKey.isNotBlank() }.forEach { item ->
+            val base = works.get(item.workKey)
+                ?: WorkEntity(workKey = item.workKey, host = item.host, title = item.title.ifBlank { item.workKey }, createdAt = now)
+            works.upsert(
+                base.copy(
+                    promptMode = if (item.promptMode == WorkEntity.PROMPT_CUSTOM) WorkEntity.PROMPT_CUSTOM else WorkEntity.PROMPT_GLOBAL,
+                    customPrompt = item.customPrompt,
+                    useGlobalGlossary = item.useGlobalGlossary,
+                    glossary = item.glossary,
+                    updatedAt = now,
+                ),
+            )
+        }
+    }
+
     // ---------- 저장된 회차 ----------
 
     suspend fun chapter(url: String): ChapterEntity? = chapters.get(url)

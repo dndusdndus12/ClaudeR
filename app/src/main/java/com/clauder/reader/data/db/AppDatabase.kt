@@ -6,6 +6,7 @@ import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
 import androidx.room.Index
+import androidx.room.Insert
 import androidx.room.PrimaryKey
 import androidx.room.Query
 import androidx.room.Room
@@ -73,6 +74,34 @@ data class ChapterEntity(
     val translatedAt: Long,
     /** 마지막으로 읽은 시각 */
     val readAt: Long,
+    /** 이 번역의 추정 비용(달러). 번역할 때 단가를 몰랐으면 null. */
+    val costUsd: Double? = null,
+)
+
+/**
+ * 번역 요청 한 번(회차 하나)의 사용 기록. 월별 누적 비용을 내는 데 쓴다.
+ * 비용은 요청할 때의 단가로 계산해 함께 적어 두므로, 나중에 단가를 바꿔도 지난 기록은 변하지 않는다.
+ */
+@Entity(tableName = "usage_log", indices = [Index("time")])
+data class UsageLogEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val time: Long,
+    val workKey: String,
+    val workTitle: String,
+    val chapterUrl: String,
+    val chapterTitle: String,
+    val modelId: String,
+    val modelName: String,
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val cacheWriteTokens: Long,
+    val cacheReadTokens: Long,
+    /** 캐시에 쓸 때의 유지 시간("5m" 또는 "1h") */
+    val cacheTtl: String,
+    /** 추정 비용(달러). 단가를 몰랐으면 null. */
+    val costUsd: Double?,
+    /** 번역이 끝까지 됐는지(실패해도 쓴 만큼은 요금이 나간다) */
+    val success: Boolean,
 )
 
 /** 회차 목록 화면용: 번역문 본문을 빼고 가볍게 읽는다. */
@@ -86,10 +115,27 @@ data class ChapterSummary(
 
 data class WorkChapterCount(val workKey: String, val count: Int)
 
+/** 한 달 동안의 합계. [month] 는 "2026-11" 꼴(기기의 현지 시간 기준). */
+data class MonthlyUsage(
+    val month: String,
+    val requests: Int,
+    val inputTokens: Long,
+    val outputTokens: Long,
+    val cacheWriteTokens: Long,
+    val cacheReadTokens: Long,
+    /** 단가를 아는 요청들의 비용 합. 하나도 없으면 null. */
+    val costUsd: Double?,
+    /** 단가를 몰라 비용에 넣지 못한 요청 수 */
+    val unpriced: Int,
+)
+
 @Dao
 interface WorkDao {
     @Query("SELECT * FROM works ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<WorkEntity>>
+
+    @Query("SELECT * FROM works")
+    suspend fun getAll(): List<WorkEntity>
 
     @Query("SELECT * FROM works WHERE workKey = :key")
     fun observe(key: String): Flow<WorkEntity?>
@@ -132,16 +178,41 @@ interface ChapterDao {
     suspend fun deleteForWork(workKey: String)
 }
 
+@Dao
+interface UsageDao {
+    @Insert
+    suspend fun insert(entry: UsageLogEntity)
+
+    @Query(
+        "SELECT strftime('%Y-%m', time / 1000, 'unixepoch', 'localtime') AS month, " +
+            "COUNT(*) AS requests, " +
+            "SUM(inputTokens) AS inputTokens, SUM(outputTokens) AS outputTokens, " +
+            "SUM(cacheWriteTokens) AS cacheWriteTokens, SUM(cacheReadTokens) AS cacheReadTokens, " +
+            "SUM(costUsd) AS costUsd, " +
+            "SUM(CASE WHEN costUsd IS NULL THEN 1 ELSE 0 END) AS unpriced " +
+            "FROM usage_log GROUP BY month ORDER BY month DESC",
+    )
+    fun observeMonthly(): Flow<List<MonthlyUsage>>
+
+    @Query("SELECT * FROM usage_log ORDER BY time DESC LIMIT :limit")
+    fun observeRecent(limit: Int): Flow<List<UsageLogEntity>>
+}
+
 @Database(
-    entities = [WorkEntity::class, ChapterEntity::class],
-    version = 2,
+    entities = [WorkEntity::class, ChapterEntity::class, UsageLogEntity::class],
+    version = 3,
     exportSchema = true,
-    // 버전 1(작품만) → 2(회차 테이블 추가). 기존 작품 설정은 그대로 유지된다.
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    autoMigrations = [
+        // 1(작품만) → 2: 회차 테이블 추가
+        AutoMigration(from = 1, to = 2),
+        // 2 → 3: 사용 기록 테이블과 회차의 추정 비용 칸 추가
+        AutoMigration(from = 2, to = 3),
+    ],
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun workDao(): WorkDao
     abstract fun chapterDao(): ChapterDao
+    abstract fun usageDao(): UsageDao
 
     companion object {
         fun create(context: Context): AppDatabase =
