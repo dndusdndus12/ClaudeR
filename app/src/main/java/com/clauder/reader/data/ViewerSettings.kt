@@ -30,6 +30,13 @@ data class ViewerSettings(
     val pageOverlapLines: Int = 3,
     /** 한 화면을 넘길 때 기존 화면이 옆으로 밀려나는 애니메이션을 보여 줄지 */
     val pageAnimation: Boolean = true,
+    /**
+     * 페이지 넘김 전용 모드: 스크롤 없이 한 장씩만 넘긴다.
+     * 한 장에는 온전한 줄만 넣으므로 화면 끝에서 글자가 잘리지 않는다.
+     */
+    val pagedMode: Boolean = false,
+    /** 위아래 막대를 숨길 때 상태 표시줄과 시스템 버튼(메뉴, 홈, 뒤로)도 함께 숨길지 */
+    val hideSystemBars: Boolean = true,
 ) {
     /** 저장된 값이 범위를 벗어나 있어도 화면이 깨지지 않게 맞춘다. */
     fun sanitized() = copy(

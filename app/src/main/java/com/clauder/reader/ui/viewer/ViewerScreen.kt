@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,13 +21,11 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBarsIgnoringVisibility
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -66,6 +65,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clauder.reader.R
 import com.clauder.reader.ai.TokenUsage
+import com.clauder.reader.data.ReadingPosition
 import com.clauder.reader.data.TapZone
 import com.clauder.reader.data.ViewerSettings
 import com.clauder.reader.data.ViewerTaps
@@ -83,7 +84,6 @@ import com.clauder.reader.translate.ReaderPhase
 import com.clauder.reader.translate.ReaderState
 import com.clauder.reader.ui.theme.AppColors
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
 import kotlin.math.roundToInt
@@ -112,13 +112,16 @@ private const val PageSlideMillis = 220
 
 /**
  * 번역문을 읽는 화면.
- * - 화면을 탭하면 위아래 막대가 숨겨지거나 다시 나타난다.
- * - 볼륨 키(블루투스 리모컨)로 한 화면씩 넘긴다.
+ * - 스크롤 모드(기본): 손가락으로 스크롤하고, 볼륨 키나 리모컨으로 한 화면씩 넘길 수도 있다.
+ * - 페이지 넘김 전용 모드: 스크롤 없이 한 장씩만 넘기며, 줄이 화면 끝에서 잘리지 않는다.
+ * - 화면을 탭하면 위아래 막대가 숨겨지고, 설정에 따라 상태 표시줄과 시스템 버튼도 함께 숨겨진다.
  *
  * @param registerPageInput 볼륨 키와 리모컨 입력을 받을 곳을 등록한다(null 이면 해제).
  * @param setDarkSystemBars 어두운 테마일 때 상태 표시줄 아이콘을 밝게 바꾼다.
+ * @param setSystemBarsHidden 상태 표시줄과 시스템 버튼을 숨기거나 다시 보인다.
+ * @param onPosition 읽던 위치가 바뀌면 알린다(회차 주소, 항목 번호, 그 안에서의 어긋남).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ViewerScreen(
     state: ReaderState,
@@ -132,59 +135,84 @@ fun ViewerScreen(
     onOpenWorkSettings: () -> Unit,
     registerPageInput: (PageInput?) -> Unit,
     setDarkSystemBars: (Boolean) -> Unit,
-    /** 읽던 위치가 바뀌면 알린다(회차 주소, 화면 맨 위 항목 번호, 그 안에서의 어긋남). */
+    setSystemBarsHidden: (Boolean) -> Unit,
     onPosition: (url: String, index: Int, offset: Int) -> Unit,
 ) {
     val chapter = state.chapter
     val palette = ViewerPalette.of(settings.theme)
     val translated = remember(state.text) { PromptBuilder.parseTranslation(state.text) }
     val listState = rememberLazyListState()
+    val paged = remember { PagedState() }
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
 
     var barsWanted by rememberSaveable { mutableStateOf(true) }
     var showSettings by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
+    var rootWidth by remember { mutableIntStateOf(0) }
     // 오류가 났을 때는 조치할 수 있도록 막대를 항상 보여 준다.
     val barsVisible = barsWanted || state.phase == ReaderPhase.ERROR
 
-    // 회차를 열 때: 새로 번역하는 회차는 맨 위에서, 저장된 회차는 읽던 위치에서 시작한다.
-    LaunchedEffect(state.openCount) { listState.scrollToItem(state.scrollIndex, state.scrollOffset) }
-
-    // 읽던 위치 저장: 스크롤이 잠시 멈추면 저장하고, 화면을 떠날 때도 한 번 더 저장한다.
-    val latestPosition by rememberUpdatedState(onPosition)
-    val doneUrl = if (state.phase == ReaderPhase.DONE) chapter?.url else null
-    LaunchedEffect(state.openCount, doneUrl) {
-        val url = doneUrl ?: return@LaunchedEffect
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collectLatest { (index, offset) ->
-                delay(600)
-                latestPosition(url, index, offset)
-            }
-    }
-    DisposableEffect(doneUrl) {
-        onDispose {
-            if (doneUrl != null) {
-                latestPosition(doneUrl, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
-            }
-        }
-    }
+    // ---------- 시스템 막대(상태 표시줄, 시스템 버튼) ----------
 
     DisposableEffect(palette.dark) {
         setDarkSystemBars(palette.dark)
         onDispose { setDarkSystemBars(false) }
     }
 
-    val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // 위아래 막대를 숨기면 시스템 막대도 함께 숨기고, 막대를 다시 보이면 함께 보인다.
+    val systemBarsHidden = settings.hideSystemBars && !barsVisible
+    LaunchedEffect(systemBarsHidden) { setSystemBarsHidden(systemBarsHidden) }
+    DisposableEffect(Unit) { onDispose { setSystemBarsHidden(false) } }
+
+    // 시스템 막대가 숨겨져도 값이 변하지 않는 높이를 쓴다. 그래야 숨기고 보일 때 글이 위아래로 움직이지 않는다.
+    val statusTop = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+    val navBottom = WindowInsets.navigationBarsIgnoringVisibility.asPaddingValues().calculateBottomPadding()
+
+    // ---------- 읽던 위치 ----------
+
+    // 지금 읽고 있는 위치(항목 번호, 어긋남). 스크롤 모드와 페이지 모드가 함께 쓰므로 모드를 바꿔도 자리가 이어진다.
+    var position by remember { mutableStateOf(state.scrollIndex to state.scrollOffset) }
+    var openSeen by remember { mutableIntStateOf(state.openCount) }
+    if (openSeen != state.openCount) {
+        // 회차를 새로 열었다: 새로 번역하는 회차는 맨 위에서, 저장된 회차는 읽던 위치에서 시작한다.
+        position = state.scrollIndex to state.scrollOffset
+        openSeen = state.openCount
+    }
+
+    LaunchedEffect(state.openCount, settings.pagedMode) {
+        if (!settings.pagedMode) {
+            listState.scrollToItem(position.first, ReadingPosition.pixels(position.second))
+            snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+                .collect { position = it }
+        }
+    }
+
+    // 저장: 위치가 잠시 멈추면 저장하고, 화면을 떠날 때도 한 번 더 저장한다.
+    val latestOnPosition by rememberUpdatedState(onPosition)
+    val latestPosition by rememberUpdatedState(position)
+    val doneUrl = if (state.phase == ReaderPhase.DONE) chapter?.url else null
+    LaunchedEffect(position, doneUrl) {
+        val url = doneUrl ?: return@LaunchedEffect
+        delay(600)
+        latestOnPosition(url, position.first, position.second)
+    }
+    DisposableEffect(doneUrl) {
+        onDispose {
+            if (doneUrl != null) latestOnPosition(doneUrl, latestPosition.first, latestPosition.second)
+        }
+    }
+
+    // ---------- 페이지 넘김 ----------
 
     // 키 입력은 화면이 다시 그려진 뒤에도 최신 값을 봐야 하므로 최신 값을 가리키는 참조로 넘긴다.
     val latestState by rememberUpdatedState(state)
     val latestSettings by rememberUpdatedState(settings)
     val latestBars by rememberUpdatedState(barsVisible)
+    val latestSystemHidden by rememberUpdatedState(systemBarsHidden)
     val latestNext by rememberUpdatedState(onNext)
 
-    // 페이지 넘김 애니메이션: 넘기기 직전의 화면을 그림으로 찍어 글 위에 덮고,
+    // 넘김 애니메이션: 넘기기 직전의 화면을 그림으로 찍어 글 위에 덮고,
     // 그 그림을 옆으로 밀어내면 아래에 이미 넘어가 있는 새 화면이 드러난다.
     val pageLayer = rememberGraphicsLayer()
     var leavingPage by remember { mutableStateOf<ImageBitmap?>(null) }
@@ -194,21 +222,16 @@ fun ViewerScreen(
     fun turnPage(forward: Boolean) {
         val current = latestState
         if (current.phase == ReaderPhase.LOADING_PAGE) return
-        if (!forward && !listState.canScrollBackward) return
-        if (forward && !listState.canScrollForward) {
-            // 회차 끝: 설정에 따라 다음 화로 넘어간다.
-            val canAdvance = current.phase == ReaderPhase.DONE && current.chapter?.hasNext == true
-            if (latestSettings.volumeKeyNextChapter && canAdvance) latestNext()
-            return
+        val pagedMode = latestSettings.pagedMode
+        val canMove = when {
+            pagedMode -> if (forward) paged.canGoForward else paged.canGoBackward
+            else -> if (forward) listState.canScrollForward else listState.canScrollBackward
         }
-        val distance = with(density) {
-            ViewerTaps.pageDistance(
-                viewportHeight = listState.layoutInfo.viewportSize.height.toFloat(),
-                coveredTop = (statusTop + if (latestBars) TopBarHeight else 0.dp).toPx(),
-                coveredBottom = (navBottom + if (latestBars) BottomBarHeight else 0.dp).toPx(),
-                lineHeight = latestSettings.lineHeight.sp.toPx(),
-                overlapLines = latestSettings.pageOverlapLines,
-            )
+        if (!canMove) {
+            // 회차 끝에서 앞으로 넘기면, 설정에 따라 다음 화로 넘어간다.
+            val canAdvance = forward && current.phase == ReaderPhase.DONE && current.chapter?.hasNext == true
+            if (canAdvance && latestSettings.volumeKeyNextChapter) latestNext()
+            return
         }
         val turn = ++turnCount
         scope.launch {
@@ -217,11 +240,25 @@ fun ViewerScreen(
                 leavingOffset.snapTo(0f)
                 leavingPage = snapshot
             }
-            val moved = listState.scrollBy(if (forward) distance else -distance)
+            val moved = if (pagedMode) {
+                paged.turn(forward)
+                true
+            } else {
+                val distance = with(density) {
+                    ViewerTaps.pageDistance(
+                        viewportHeight = listState.layoutInfo.viewportSize.height.toFloat(),
+                        coveredTop = (statusTop + if (latestBars) TopBarHeight else 0.dp).toPx(),
+                        coveredBottom = ((if (latestSystemHidden) 0.dp else navBottom) + if (latestBars) BottomBarHeight else 0.dp).toPx(),
+                        lineHeight = latestSettings.lineHeight.sp.toPx(),
+                        overlapLines = latestSettings.pageOverlapLines,
+                    )
+                }
+                listState.scrollBy(if (forward) distance else -distance) != 0f
+            }
             try {
                 // 다음 화면으로 갈 때는 기존 화면이 왼쪽으로, 이전 화면으로 갈 때는 오른쪽으로 밀려난다.
-                if (snapshot != null && moved != 0f) {
-                    val width = listState.layoutInfo.viewportSize.width.toFloat()
+                if (snapshot != null && moved) {
+                    val width = rootWidth.toFloat()
                     leavingOffset.animateTo(if (forward) -width else width, tween(PageSlideMillis, easing = FastOutSlowInEasing))
                 }
             } finally {
@@ -243,10 +280,11 @@ fun ViewerScreen(
         onDispose { registerPageInput(null) }
     }
 
-    Box(Modifier.fillMaxSize().background(palette.background)) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
+    // ---------- 화면 ----------
+
+    Box(Modifier.fillMaxSize().background(palette.background).onSizeChanged { rootWidth = it.width }) {
+        Box(
+            Modifier
                 .fillMaxSize()
                 .drawWithContent {
                     // 화면에 그리는 내용을 그대로 기록해 두었다가 넘길 때 그림으로 꺼내 쓴다.
@@ -262,38 +300,69 @@ fun ViewerScreen(
                         }
                     }
                 },
-            // 막대는 글 위에 떠 있으므로, 막대를 숨기거나 보여도 글의 위치가 움직이지 않는다.
-            // 대신 처음과 끝이 막대에 가려지지 않도록 위아래에 여유를 둔다.
-            contentPadding = PaddingValues(
-                start = settings.margin.dp,
-                end = settings.margin.dp,
-                top = statusTop + TopBarHeight + 16.dp,
-                bottom = navBottom + BottomBarHeight + 20.dp,
-            ),
         ) {
-            if (state.phase != ReaderPhase.LOADING_PAGE) {
-                item(key = "title") {
-                    Text(
-                        translated.title.ifBlank { chapter?.chapterTitle.orEmpty() },
-                        fontSize = (settings.fontSize + 3).sp,
-                        lineHeight = ((settings.fontSize + 3) * 1.45f).sp,
-                        fontWeight = FontWeight.Bold,
-                        color = palette.text,
-                        modifier = Modifier.padding(bottom = 20.dp),
-                    )
+            if (settings.pagedMode) {
+                val loading = state.phase == ReaderPhase.LOADING_PAGE
+                PagedContent(
+                    content = if (loading) PromptBuilder.Translated("", emptyList())
+                    else translated.copy(title = translated.title.ifBlank { chapter?.chapterTitle.orEmpty() }),
+                    streaming = state.phase == ReaderPhase.STREAMING,
+                    settings = settings,
+                    palette = palette,
+                    topInset = statusTop,
+                    // 시스템 버튼을 숨기는 설정이면 그 자리까지 글을 채운다(막대를 잠깐 보일 때만 가려진다).
+                    bottomInset = if (settings.hideSystemBars) 0.dp else navBottom,
+                    state = paged,
+                    restoreKey = state.openCount,
+                    startIndex = position.first,
+                    startOffset = position.second,
+                    statusText = progressLabel(state),
+                    onPosition = { index, offset -> position = index to offset },
+                    onSwipe = { forward -> turnPage(forward) },
+                )
+                if (state.phase == ReaderPhase.ERROR) {
+                    Box(Modifier.align(Alignment.Center).padding(horizontal = settings.margin.dp)) {
+                        StatusFooter(state, palette, onRetranslate, onOpenAiSettings)
+                    }
                 }
-                itemsIndexed(translated.paragraphs) { _, paragraph ->
-                    Text(
-                        paragraph,
-                        fontSize = settings.fontSize.sp,
-                        lineHeight = settings.lineHeight.sp,
-                        color = palette.text,
-                        modifier = Modifier.padding(bottom = (settings.fontSize * 0.9f).dp),
-                    )
+            } else {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    // 막대는 글 위에 떠 있으므로, 막대를 숨기거나 보여도 글의 위치가 움직이지 않는다.
+                    // 대신 처음과 끝이 막대에 가려지지 않도록 위아래에 여유를 둔다.
+                    contentPadding = PaddingValues(
+                        start = settings.margin.dp,
+                        end = settings.margin.dp,
+                        top = statusTop + TopBarHeight + 16.dp,
+                        bottom = navBottom + BottomBarHeight + 20.dp,
+                    ),
+                ) {
+                    if (state.phase != ReaderPhase.LOADING_PAGE) {
+                        item(key = "title") {
+                            Text(
+                                translated.title.ifBlank { chapter?.chapterTitle.orEmpty() },
+                                fontSize = (settings.fontSize + 3).sp,
+                                lineHeight = ((settings.fontSize + 3) * 1.45f).sp,
+                                fontWeight = FontWeight.Bold,
+                                color = palette.text,
+                                modifier = Modifier.padding(bottom = 20.dp),
+                            )
+                        }
+                        itemsIndexed(translated.paragraphs) { _, paragraph ->
+                            Text(
+                                paragraph,
+                                fontSize = settings.fontSize.sp,
+                                lineHeight = settings.lineHeight.sp,
+                                color = palette.text,
+                                modifier = Modifier.padding(bottom = (settings.fontSize * 0.9f).dp),
+                            )
+                        }
+                    }
+                    item(key = "status") {
+                        StatusFooter(state, palette, onRetranslate, onOpenAiSettings)
+                    }
                 }
-            }
-            item(key = "status") {
-                StatusFooter(state, palette, onRetranslate, onOpenAiSettings)
             }
         }
 
@@ -309,14 +378,16 @@ fun ViewerScreen(
             )
         }
 
-        // 막대를 숨겼을 때 글이 상태 표시줄과 시스템 버튼 밑으로 비쳐 보이지 않게 가린다.
+        // 글이 상태 표시줄(카메라 구멍 포함)과 시스템 버튼 밑으로 비쳐 보이지 않게 가린다.
         Box(Modifier.fillMaxWidth().height(statusTop).background(palette.background).align(Alignment.TopCenter))
-        Box(Modifier.fillMaxWidth().height(navBottom).background(palette.background).align(Alignment.BottomCenter))
+        if (!systemBarsHidden) {
+            Box(Modifier.fillMaxWidth().height(navBottom).background(palette.background).align(Alignment.BottomCenter))
+        }
 
         AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
             Column(Modifier.fillMaxWidth().background(palette.bar).pointerInput(Unit) {}) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().height(TopBarHeight).padding(horizontal = 4.dp),
+                    Modifier.fillMaxWidth().padding(top = statusTop).height(TopBarHeight).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onBack) {
@@ -362,8 +433,20 @@ fun ViewerScreen(
         AnimatedVisibility(barsVisible, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
             Column(Modifier.fillMaxWidth().background(palette.bar).pointerInput(Unit) {}) {
                 HorizontalDivider(color = palette.divider)
+                // 페이지 모드에는 글 끝에 토큰 수를 적을 자리가 없으므로 막대에 보여 준다.
+                if (settings.pagedMode && state.phase == ReaderPhase.DONE) {
+                    usageSummary(state)?.let { summary ->
+                        Text(
+                            summary,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = palette.secondary,
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+                        )
+                    }
+                }
                 Row(
-                    Modifier.fillMaxWidth().navigationBarsPadding().height(BottomBarHeight).padding(horizontal = 12.dp),
+                    Modifier.fillMaxWidth().padding(bottom = navBottom).height(BottomBarHeight).padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -402,6 +485,17 @@ fun ViewerScreen(
     }
 }
 
+/** 진행 중일 때의 한 줄 안내. 진행 중이 아니면 null. */
+private fun progressLabel(state: ReaderState): String? = when (state.phase) {
+    ReaderPhase.LOADING_PAGE -> "회차를 불러오는 중…"
+    ReaderPhase.REQUESTING ->
+        (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state)
+
+    ReaderPhase.THINKING -> "모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다." + part(state)
+    ReaderPhase.STREAMING -> "번역 중…" + part(state)
+    ReaderPhase.DONE, ReaderPhase.ERROR -> null
+}
+
 @Composable
 private fun StatusFooter(
     state: ReaderState,
@@ -411,14 +505,6 @@ private fun StatusFooter(
 ) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 24.dp)) {
         when (state.phase) {
-            ReaderPhase.LOADING_PAGE -> Progress("회차를 불러오는 중…", palette)
-            ReaderPhase.REQUESTING -> Progress(
-                (if (state.retrying) "문제가 있어 자동으로 다시 시도하는 중…" else "번역을 요청하는 중…") + part(state),
-                palette,
-            )
-
-            ReaderPhase.THINKING -> Progress("모델이 번역을 준비하는 중… 이 동안은 글자가 나오지 않습니다." + part(state), palette)
-            ReaderPhase.STREAMING -> Progress("번역 중…" + part(state), palette)
             ReaderPhase.DONE -> UsageLine(state, palette)
 
             ReaderPhase.ERROR -> {
@@ -447,6 +533,8 @@ private fun StatusFooter(
                 }
                 UsageLine(state, palette)
             }
+
+            else -> progressLabel(state)?.let { Progress(it, palette) }
         }
     }
 }
@@ -465,20 +553,26 @@ private fun Progress(label: String, palette: ViewerPalette) {
 
 @Composable
 private fun UsageLine(state: ReaderState, palette: ViewerPalette) {
-    val usage = state.usage ?: return
+    val summary = usageSummary(state) ?: return
+    Text(
+        summary,
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = palette.secondary,
+        modifier = Modifier.padding(top = 12.dp),
+    )
+}
+
+/** 토큰 수, 모델, 용어집 적용 수를 두 줄로 요약한다. 토큰 기록이 없으면 null. */
+private fun usageSummary(state: ReaderState): String? {
+    val usage = state.usage ?: return null
     val prefix = if (state.fromCache) "저장된 번역 · " else ""
     val details = buildList {
         if (state.modelName.isNotBlank()) add(state.modelName)
         if (state.glossaryTerms > 0) add("용어집 ${state.glossaryTerms}개 적용")
         if (state.chunkCount > 1) add("${state.chunkCount}부분으로 나눠 번역")
     }.joinToString(" · ")
-    Text(
-        prefix + usageText(usage) + if (details.isNotBlank()) "\n$details" else "",
-        fontSize = 12.sp,
-        lineHeight = 18.sp,
-        color = palette.secondary,
-        modifier = Modifier.padding(top = 12.dp),
-    )
+    return prefix + usageText(usage) + if (details.isNotBlank()) "\n$details" else ""
 }
 
 private fun usageText(u: TokenUsage): String {

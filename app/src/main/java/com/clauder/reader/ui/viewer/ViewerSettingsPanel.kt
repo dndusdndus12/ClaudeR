@@ -130,6 +130,20 @@ fun ViewerSettingsPanel(settings: ViewerSettings, onChange: (ViewerSettings) -> 
 
         HorizontalDivider(color = AppColors.Outline, modifier = Modifier.padding(vertical = 6.dp))
 
+        Toggle(
+            title = "페이지 넘김 전용 모드",
+            detail = "스크롤 없이 한 장씩만 넘깁니다. 한 장에는 온전한 줄만 넣어 화면 끝에서 글자가 잘리지 않습니다. " +
+                "화면을 좌우나 위아래로 밀어도 넘어갑니다.",
+            checked = settings.pagedMode,
+            onChange = { onChange(settings.copy(pagedMode = it)) },
+        )
+        Toggle(
+            title = "상태 표시줄과 시스템 버튼 숨기기",
+            detail = "화면을 탭해 위아래 막대를 숨기면 시계, 와이파이 표시와 메뉴/홈/뒤로 버튼도 함께 숨깁니다. " +
+                "다시 탭하면 모두 나타납니다.",
+            checked = settings.hideSystemBars,
+            onChange = { onChange(settings.copy(hideSystemBars = it)) },
+        )
         Stepper(
             label = "넘길 때 겹치는 줄 수",
             value = "${settings.pageOverlapLines}줄",

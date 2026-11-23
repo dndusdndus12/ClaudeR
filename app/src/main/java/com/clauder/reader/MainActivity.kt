@@ -47,6 +47,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
 import com.clauder.reader.ai.ApiException
 import com.clauder.reader.ai.KeyRotator
@@ -122,6 +125,7 @@ class MainActivity : ComponentActivity() {
                     browserNotice = browserNotice,
                     registerPageInput = { input -> pageInput = input },
                     setDarkSystemBars = ::applySystemBars,
+                    setSystemBarsHidden = ::setSystemBarsHidden,
                 )
             }
         }
@@ -138,6 +142,20 @@ class MainActivity : ComponentActivity() {
             SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
         }
         enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+    }
+
+    /**
+     * 뷰어에서 읽는 동안 상태 표시줄과 시스템 버튼을 숨기거나 다시 보인다.
+     * 숨겨진 동안에도 화면 가장자리에서 쓸어 넘기면 잠깐 나타난다.
+     */
+    private fun setSystemBarsHidden(hidden: Boolean) {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (hidden) {
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
     }
 
     /**
@@ -252,6 +270,7 @@ private fun AppRoot(
     browserNotice: MutableState<String?>,
     registerPageInput: (PageInput?) -> Unit,
     setDarkSystemBars: (Boolean) -> Unit,
+    setSystemBarsHidden: (Boolean) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val settings = app.settings
@@ -438,6 +457,7 @@ private fun AppRoot(
                         registerPageInput = registerPageInput,
                         onPosition = reader::savePosition,
                         setDarkSystemBars = setDarkSystemBars,
+                        setSystemBarsHidden = setSystemBarsHidden,
                         onBack = {
                             reader.close()
                             pop()
